@@ -25,7 +25,8 @@ import logging
 
 import tensorflow as tf
 
-from qa_model import QAModel
+# from qa_model import QAModel
+from end_dep_start_concat_model import QAModel
 from vocab import get_glove
 from official_eval_helper import get_json_data, generate_answers
 
