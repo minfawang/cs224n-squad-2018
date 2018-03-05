@@ -144,6 +144,16 @@ class QAModel(object):
         blended_reps = tf.concat([context_hiddens, attn_output], axis=2) # (batch_size, context_len, hidden_size*4)
 
         def shared_output_nn(blended_reps_se, reuse=None):
+            """
+            Output Neural Nets with shared weights.
+
+            Inputs:
+              blended_reps_se: shape (batch_size, context_len, 4*hidden_size).
+              reuse: True, None or tf.AUTO_REUSE.
+
+            Outputs:
+              (logits, probdists): Same as the output of marked_softmax().
+            """
             with tf.variable_scope('FirstHidden') as hidden_scope:
                 blended_reps_final = tf.contrib.layers.fully_connected(
                     blended_reps_se,
