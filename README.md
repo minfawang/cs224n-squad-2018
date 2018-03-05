@@ -10,3 +10,5 @@ Note: this code is adapted in part from the [Neural Language Correction](https:/
 `edsa_model.py`: shortened from end-dep-start-add model. It borrows the idea from handout section 5.3. After making the prediction of the start position. Create a start attention vector using the sum of blended position representation weighted by the probability distribution of that position being the start position. Then it adds that attention vector to the blended vector for every postion to make the end prediction.
 
 `edsc_model.py`: shortened from end-dep-start-concat model. Similar to `edsa_model.py`, except it concatenates the attention vector to the blended vector.
+
+`edsc2_model.py`: Similar to 'edsc_model.py', except it uses different weights in final softmax layer for start and end predictions.

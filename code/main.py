@@ -27,7 +27,8 @@ import tensorflow as tf
 
 # from qa_model import QAModel
 # from edsa_model import QAModel
-from edsc_model import QAModel
+# from edsc_model import QAModel
+from edsc2_model import QAModel
 from vocab import get_glove
 from official_eval_helper import get_json_data, generate_answers
 
