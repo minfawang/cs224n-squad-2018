@@ -137,17 +137,14 @@ class QAModel(object):
         # Compute similarity matrix. Don't forget to use the mask when necessary.
         context_mask_3d = tf.cast(tf.expand_dims(self.context_mask, 2), tf.float32)  # (batch_size, context_len, 1)
         masked_context_hiddens = tf.multiply(context_hiddens, context_mask_3d, name='masked_context_hiddens')  # (batch_size, context_len, hidden_size*2)
-        masked_context_hiddens_4d = tf.expand_dims(masked_context_hiddens, 2, name='masked_context_hiddens_4d')  # (batch_size, context_len, 1, hidden_size*2)
         question_mask_3d = tf.cast(tf.expand_dims(self.qn_mask, 2), tf.float32)  # (batch_size, question_len, 1)
         masked_question_hiddens = tf.multiply(question_hiddens, question_mask_3d, name='masked_question_hiddens')  # (batch_size, question_len, hidden_size*2)
-        masked_question_hiddens_4d = tf.expand_dims(masked_question_hiddens, 1, name='masked_question_hiddens_4d')  # (batch_size, 1, question_len, hidden_size*2)
 
-        W_sim_cq = tf.get_variable('W_sim_cq', shape=(1, 1, 1, self.FLAGS.hidden_size * 2))
+        W_sim_cq = tf.get_variable('W_sim_cq', shape=(1, 1, self.FLAGS.hidden_size * 2))
         W_sim_c = tf.get_variable('W_sim_c', shape=(1, 1, self.FLAGS.hidden_size * 2))
         W_sim_q = tf.get_variable('W_sim_q', shape=(1, 1, self.FLAGS.hidden_size * 2))
 
-        masked_cq_hiddens = tf.multiply(masked_context_hiddens_4d, masked_question_hiddens_4d, name='masked_cq_hiddens')  # (batch_size, context_len, question_len, hidden_size*2)
-        similarity_matrix_cq = tf.reduce_sum(W_sim_cq * masked_cq_hiddens, -1, name='similarity_matrix_cq')  # (batch_size, context_len, question_len)
+        similarity_matrix_cq = tf.matmul(W_sim_cq * masked_context_hiddens, tf.transpose(masked_question_hiddens, perm=[0, 2, 1]))  # (batch_size, context_len, question_len)
         similarity_matrix_c = tf.reduce_sum(masked_context_hiddens * W_sim_c, -1, keep_dims=True, name='similarity_matrix_c')  # (batch_size, context_len, 1)
         similarity_matrix_q = tf.expand_dims(tf.reduce_sum(masked_question_hiddens * W_sim_q, -1), 1, name='similarity_matrix_q')  # (batch_size, 1, question_len)
         similarity_matrix = similarity_matrix_cq + similarity_matrix_c + similarity_matrix_q  # (batch_size, context_len, question_len)
@@ -161,20 +158,20 @@ class QAModel(object):
         q2c_attn_softmax = tf.expand_dims(tf.nn.softmax(q2c_attn_max), 1, name='q2c_attn_softmax')  # (batch_size, 1, context_len)
         q2c_attn = tf.matmul(q2c_attn_softmax, masked_context_hiddens, name='q2c_attn')  # (batch_size, 1, hidden_size*2)
 
-        # blended_reps:
-        #   masked_context_hiddens (batch_size, context_len, hidden_size*2)
-        #   c2q_attn               (batch_size, context_len, hidden_size*2)
-        #   q2c_attn               (batch_size,           1, hidden_size*2)
-        def blend_fc(c, c2q, q2c, name, probdist=None):
+        # blended_reps inputs:
+        #   c   (batch_size, context_len, hidden_size*2)
+        #   c2q (batch_size, context_len, hidden_size*2)
+        #   q2c (batch_size,           1, hidden_size*2)
+        def blend_fc(c, c2q, q2c):
           blended_c = tf.contrib.layers.fully_connected(c, num_outputs=self.FLAGS.hidden_size, activation_fn=None)  # (batch_size, context_len, hidden_size)
           blended_c2q = tf.contrib.layers.fully_connected(c2q, num_outputs=self.FLAGS.hidden_size, activation_fn=None)  # (batch_size, context_len, hidden_size)
           blended_q2c = tf.contrib.layers.fully_connected(q2c, num_outputs=self.FLAGS.hidden_size, activation_fn=None)  # (batch_size, 1, hidden_size)
           blended_reps = blended_c + blended_c2q + blended_q2c  # (batch_size, context_len, hidden_size)
-          if probdist is not None:
-            blended_reps *= probdist
-          return tf.nn.relu(blended_reps, name=name)  # (batch_size, context_len, hidden_size)
+          return blended_reps  # (batch_size, context_len, hidden_size)
 
-        blended_reps_final = blend_fc(masked_context_hiddens, c2q_attn, q2c_attn, name='blended_reps_final')  # (batch_size, context_len, hidden_size)
+        blended_reps = blend_fc(masked_context_hiddens, c2q_attn, q2c_attn)  # (batch_size, context_len, hidden_size)
+        blended_reps_final = tf.nn.dropout(tf.nn.relu(blended_reps), self.keep_prob, name='blended_reps_final')  # (batch_size, context_len, hidden_size)
+
 
         # Use softmax layer to compute probability distribution for start location
         # Note this produces self.logits_start and self.probdist_start, both of which have shape (batch_size, context_len)
@@ -186,9 +183,9 @@ class QAModel(object):
         # Note this produces self.logits_end and self.probdist_end, both of which have shape (batch_size, context_len)
         with vs.variable_scope("EndDist"):
             probdist_start_t = tf.expand_dims(self.probdist_start, -1)  # shape (batch_size, context_len, 1)
-            blended_dep_start_final = blend_fc(masked_context_hiddens, c2q_attn, q2c_attn, name='blended_dep_start_final', probdist=probdist_start_t)  # (batch_size, context_len, hidden_size)
-
-            blended_reps_final_end = tf.add(blended_reps_final, blended_dep_start_final, name='blended_reps_final_end')
+            blended_dep_start = probdist_start_t * blend_fc(masked_context_hiddens, c2q_attn, q2c_attn)  # (batch_size, context_len, hidden_size)
+            blended_reps_final_end = tf.nn.relu(blended_reps + blended_dep_start)  # (batch_size, context_len, hidden_size)
+            blended_reps_final_end = tf.nn.dropout(blended_reps_final_end, self.keep_prob, name='blended_reps_final_end')  # (batch_size, context_len, hidden_size)
             softmax_layer_end = SimpleSoftmaxLayer()
             self.logits_end, self.probdist_end = softmax_layer_end.build_graph(blended_reps_final_end, self.context_mask)
 
