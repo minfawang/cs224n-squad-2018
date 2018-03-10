@@ -1,5 +1,7 @@
 data/
 experiments/
+mini_data/
+mini_experiments/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

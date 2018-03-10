@@ -12,3 +12,17 @@ Note: this code is adapted in part from the [Neural Language Correction](https:/
 `edsc_model.py`: shortened from end-dep-start-concat model. Similar to `edsa_model.py`, except it concatenates the attention vector to the blended vector.
 
 `edsc2_model.py`: Similar to 'edsc_model.py', except it uses different weights in final softmax layer for start and end predictions.
+
+## Generate Mini Data
+
+Run the command from terminal below will create mini data in "mini_data/" directory.
+
+```
+python gen_mini.py
+```
+
+To use mini data in training, run a command like below:
+
+```
+python code/main.py --mode=train --data_dir=mini_data --train_dir="mini_experiments/bidaf_edsc3"
+```
