@@ -158,20 +158,17 @@ class QAModel(object):
         q2c_attn_softmax = tf.expand_dims(tf.nn.softmax(q2c_attn_max), 1, name='q2c_attn_softmax')  # (batch_size, 1, context_len)
         q2c_attn = tf.matmul(q2c_attn_softmax, masked_context_hiddens, name='q2c_attn')  # (batch_size, 1, hidden_size*2)
 
-        # blended_reps inputs:
-        #   c   (batch_size, context_len, hidden_size*2)
-        #   c2q (batch_size, context_len, hidden_size*2)
-        #   q2c (batch_size,           1, hidden_size*2)
-        def blend_fc(c, c2q, q2c):
-          blended_c = tf.contrib.layers.fully_connected(c, num_outputs=self.FLAGS.hidden_size, activation_fn=None)  # (batch_size, context_len, hidden_size)
-          blended_c2q = tf.contrib.layers.fully_connected(c2q, num_outputs=self.FLAGS.hidden_size, activation_fn=None)  # (batch_size, context_len, hidden_size)
-          blended_q2c = tf.contrib.layers.fully_connected(q2c, num_outputs=self.FLAGS.hidden_size, activation_fn=None)  # (batch_size, 1, hidden_size)
-          blended_reps = blended_c + blended_c2q + blended_q2c  # (batch_size, context_len, hidden_size)
-          return blended_reps  # (batch_size, context_len, hidden_size)
+        blended_reps = tf.concat([
+            masked_context_hiddens,
+            c2q_attn,
+            tf.tile(q2c_attn, [1, self.FLAGS.context_len, 1])
+        ], 2, name='blended_reps')  # (batch_size, context_len, hidden_size*6)
 
-        blended_reps = blend_fc(masked_context_hiddens, c2q_attn, q2c_attn)  # (batch_size, context_len, hidden_size)
-        blended_reps_final = tf.nn.dropout(tf.nn.relu(blended_reps), self.keep_prob, name='blended_reps_final')  # (batch_size, context_len, hidden_size)
-
+        blended_reps_final = tf.contrib.layers.fully_connected(
+            blended_reps,
+            num_outputs=self.FLAGS.hidden_size,
+            normalizer_fn=tf.contrib.layers.batch_norm
+        )  # (batch_size, context_len, hidden_size)
 
         # Use softmax layer to compute probability distribution for start location
         # Note this produces self.logits_start and self.probdist_start, both of which have shape (batch_size, context_len)
@@ -183,9 +180,12 @@ class QAModel(object):
         # Note this produces self.logits_end and self.probdist_end, both of which have shape (batch_size, context_len)
         with vs.variable_scope("EndDist"):
             probdist_start_t = tf.expand_dims(self.probdist_start, -1)  # shape (batch_size, context_len, 1)
-            blended_dep_start = probdist_start_t * blend_fc(masked_context_hiddens, c2q_attn, q2c_attn)  # (batch_size, context_len, hidden_size)
-            blended_reps_final_end = tf.nn.relu(blended_reps + blended_dep_start)  # (batch_size, context_len, hidden_size)
-            blended_reps_final_end = tf.nn.dropout(blended_reps_final_end, self.keep_prob, name='blended_reps_final_end')  # (batch_size, context_len, hidden_size)
+
+            attn_start = tf.reduce_sum(probdist_start_t * blended_reps_final, 1, keep_dims=True)  # (batch_size, 1, hidden_size)
+            blended_reps_final_end = tf.concat([
+                blended_reps_final,
+                tf.tile(attn_start, [1, self.FLAGS.context_len, 1])
+            ], 2)  # (batch_size, context_len, hidden_size*2)
             softmax_layer_end = SimpleSoftmaxLayer()
             self.logits_end, self.probdist_end = softmax_layer_end.build_graph(blended_reps_final_end, self.context_mask)
 
