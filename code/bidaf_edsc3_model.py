@@ -126,7 +126,6 @@ class QAModel(object):
           self.probdist_start, self.probdist_end: Both shape (batch_size, context_len). Each row sums to 1.
             These are the result of taking (masked) softmax of logits_start and logits_end.
         """
-
         # Use a RNN to get hidden states for the context and the question
         # Note: here the RNNEncoder is shared (i.e. the weights are the same)
         # between the context and the question.
@@ -134,33 +133,39 @@ class QAModel(object):
         context_hiddens = encoder.build_graph(self.context_embs, self.context_mask) # (batch_size, context_len, hidden_size*2)
         question_hiddens = encoder.build_graph(self.qn_embs, self.qn_mask) # (batch_size, question_len, hidden_size*2)
 
-        bidaf_attn = BidafAttn(self.keep_prob, self.FLAGS.context_len, 2 * self.FLAGS.hidden_size)
-        blended_reps = bidaf_attn.build_graph(question_hiddens, self.qn_mask, context_hiddens, self.context_mask)  # (batch_size, context_len, hidden_size*6)
+        # Encode query-aware representations of the context words
+        bidaf_attn = BidafAttn(self.keep_prob, self.FLAGS.context_len, self.FLAGS.hidden_size * 2)
+        bidaf_output = bidaf_attn.build_graph(question_hiddens, self.qn_mask, context_hiddens, self.context_mask)  # (batch_size, context_len, hidden_size*6)
 
-        blended_reps_final = tf.contrib.layers.fully_connected(
-            blended_reps,
+        # Condense the information: hidden_size*6 --> hidden_size
+        bidaf_output = tf.contrib.layers.fully_connected(
+            bidaf_output,
             num_outputs=self.FLAGS.hidden_size,
             normalizer_fn=tf.contrib.layers.batch_norm
         )  # (batch_size, context_len, hidden_size)
 
+        # Capture interactions among context words conditioned on the query.
+        encoder1 = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob)  # params count: (hidden_size + hidden_size) * hidden_size * 2 * 3
+        model_reps1 = encoder1.build_graph(bidaf_output, self.context_mask, variable_scope='ModelEncoder1')  # (batch_size, context_len, hidden_size*2)
+        encoder2 = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob)
+        model_reps = encoder2.build_graph(model_reps1, self.context_mask, variable_scope='ModelEncoder2')  # (batch_size, context_len, hidden_size*2)
+
         # Use softmax layer to compute probability distribution for start location
         # Note this produces self.logits_start and self.probdist_start, both of which have shape (batch_size, context_len)
         with vs.variable_scope("StartDist"):
+            start_reps = tf.concat([bidaf_output, model_reps], 2)  # (batch_size, context_len, hidden_size*3)
             softmax_layer_start = SimpleSoftmaxLayer()
-            self.logits_start, self.probdist_start = softmax_layer_start.build_graph(blended_reps_final, self.context_mask)
+            self.logits_start, self.probdist_start = softmax_layer_start.build_graph(start_reps, self.context_mask)
 
         # Use softmax layer to compute probability distribution for end location
         # Note this produces self.logits_end and self.probdist_end, both of which have shape (batch_size, context_len)
         with vs.variable_scope("EndDist"):
-            probdist_start_t = tf.expand_dims(self.probdist_start, -1)  # shape (batch_size, context_len, 1)
+            end_encoder = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob)
+            model_end_reps = end_encoder.build_graph(model_reps, self.context_mask, variable_scope='EndEncoder')  # (batch_size, context_len, hidden_size*2)
+            end_reps = tf.concat([bidaf_output, model_end_reps], 2)  # (batch_size, context_len, hidden_size*3)
 
-            attn_start = tf.reduce_sum(probdist_start_t * blended_reps_final, 1, keep_dims=True)  # (batch_size, 1, hidden_size)
-            blended_reps_final_end = tf.concat([
-                blended_reps_final,
-                tf.tile(attn_start, [1, self.FLAGS.context_len, 1])
-            ], 2)  # (batch_size, context_len, hidden_size*2)
             softmax_layer_end = SimpleSoftmaxLayer()
-            self.logits_end, self.probdist_end = softmax_layer_end.build_graph(blended_reps_final_end, self.context_mask)
+            self.logits_end, self.probdist_end = softmax_layer_end.build_graph(end_reps, self.context_mask)
 
     def add_loss(self):
         """

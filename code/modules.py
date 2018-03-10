@@ -49,7 +49,7 @@ class RNNEncoder(object):
         self.rnn_cell_bw = rnn_cell.GRUCell(self.hidden_size)
         self.rnn_cell_bw = DropoutWrapper(self.rnn_cell_bw, input_keep_prob=self.keep_prob)
 
-    def build_graph(self, inputs, masks, initial_state_fw=None, initial_state_bw=None):
+    def build_graph(self, inputs, masks, variable_scope='RNNEncoder'):
         """
         Inputs:
           inputs: Tensor shape (batch_size, seq_len, input_size)
@@ -61,7 +61,7 @@ class RNNEncoder(object):
           out: Tensor shape (batch_size, seq_len, hidden_size*2).
             This is all hidden states (fw and bw hidden states are concatenated).
         """
-        with vs.variable_scope("RNNEncoder"):
+        with vs.variable_scope(variable_scope):
             input_lens = tf.reduce_sum(masks, reduction_indices=1) # shape (batch_size)
 
             # Note: fw_out and bw_out are the hidden states for every timestep.
@@ -71,9 +71,7 @@ class RNNEncoder(object):
                 self.rnn_cell_bw,
                 inputs,
                 input_lens,
-                dtype=tf.float32,
-                initial_state_fw=initial_state_fw,
-                initial_state_bw=initial_state_bw)
+                dtype=tf.float32)
 
             # Concatenate the forward and backward hidden states
             out = tf.concat([fw_out, bw_out], 2)
