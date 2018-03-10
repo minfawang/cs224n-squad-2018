@@ -123,6 +123,71 @@ class SimpleSoftmaxLayer(object):
             return masked_logits, prob_dist
 
 
+class BidafAttn(object):
+    """Model for attention described in Bidaf(bi-directional attention flow).
+    """
+    def __init__(self, keep_prob, num_keys, value_vec_size):
+        """
+        Note: The key_vec_size has to be the same as the value_vec_size.
+
+        Inputs:
+          keep_prob: tensor containing a single scalar that is the keep probability (for dropout)
+          num_keys: int
+          value_vec_size: size of the value vectors. int
+        """
+        self.keep_prob = keep_prob
+        self.num_keys = num_keys
+        self.value_vec_size = value_vec_size
+
+    def build_graph(self, values, values_mask, keys, keys_mask):
+        """Keys attend to values.
+        For each key, return an attention output vector.
+
+        Inputs:
+          values: Tensor shape (batch_size, num_values, value_vec_size).
+          values_mask: Tensor shape (batch_size, num_values).
+            1s where there's real input, 0s where there's padding
+          keys: Tensor shape (batch_size, num_keys, key_vec_size)
+          keys_mask: Tensor shape (batch_size, num_keys).
+            1s where there's real input, 0s where there's padding
+
+        Outputs:
+          output: attention output. Tensor shape (batch_size, num_keys, hidden_size*3).
+        """
+        with tf.variable_scope('BidafAttn'):
+            keys_mask_3d = tf.cast(tf.expand_dims(keys_mask, 2), tf.float32)  # (batch_size, num_keys, 1)
+            masked_keys = tf.multiply(keys, keys_mask_3d, name='masked_keys')  # (batch_size, num_keys, value_vec_size)
+            values_mask_3d = tf.cast(tf.expand_dims(values_mask, 2), tf.float32)  # (batch_size, num_values, 1)
+            masked_values = tf.multiply(values, values_mask_3d, name='masked_values')  # (batch_size, num_values, value_vec_size)
+
+            W_sim_cq = tf.get_variable('W_sim_cq', shape=(1, 1, self.value_vec_size))
+            W_sim_c = tf.get_variable('W_sim_c', shape=(1, 1, self.value_vec_size))
+            W_sim_q = tf.get_variable('W_sim_q', shape=(1, 1, self.value_vec_size))
+
+            similarity_matrix_cq = tf.matmul(W_sim_cq * masked_keys, tf.transpose(masked_values, perm=[0, 2, 1]))  # (batch_size, num_keys, num_values)
+            similarity_matrix_c = tf.reduce_sum(masked_keys * W_sim_c, -1, keep_dims=True, name='similarity_matrix_c')  # (batch_size, num_keys, 1)
+            similarity_matrix_q = tf.expand_dims(tf.reduce_sum(masked_values * W_sim_q, -1), 1, name='similarity_matrix_q')  # (batch_size, 1, num_values)
+            similarity_matrix = similarity_matrix_cq + similarity_matrix_c + similarity_matrix_q  # (batch_size, num_keys, num_values)
+
+            # c2q
+            c2q_attn_weights = tf.nn.softmax(similarity_matrix, 2, name='c2q_attn_weights')  # (batch_size, num_keys, num_values)
+            c2q_attn = tf.matmul(c2q_attn_weights, masked_values) # (batch_size, num_keys, value_vec_size)
+
+            # q2c
+            q2c_attn_max = tf.reduce_max(similarity_matrix, axis=2, name='q2c_attn_max')  # (batch_size, num_keys)
+            q2c_attn_softmax = tf.expand_dims(tf.nn.softmax(q2c_attn_max), 1, name='q2c_attn_softmax')  # (batch_size, 1, num_keys)
+            q2c_attn = tf.matmul(q2c_attn_softmax, masked_keys, name='q2c_attn')  # (batch_size, 1, value_vec_size)
+
+            blended_reps = tf.concat([
+                masked_keys,
+                c2q_attn,
+                tf.tile(q2c_attn, [1, self.num_keys, 1])
+            ], 2)  # (batch_size, num_keys, value_vec_size*3)
+
+            blended_reps = tf.nn.dropout(blended_reps, self.keep_prob)
+
+            return blended_reps
+
 class BasicAttn(object):
     """Module for basic attention.
 

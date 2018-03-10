@@ -30,7 +30,7 @@ from tensorflow.python.ops import embedding_ops
 from evaluate import exact_match_score, f1_score
 from data_batcher import get_batch_generator
 from pretty_print import print_example
-from modules import RNNEncoder, SimpleSoftmaxLayer, BasicAttn, MulAttn
+from modules import RNNEncoder, SimpleSoftmaxLayer, BasicAttn, MulAttn, BidafAttn
 
 logging.basicConfig(level=logging.INFO)
 
@@ -134,35 +134,8 @@ class QAModel(object):
         context_hiddens = encoder.build_graph(self.context_embs, self.context_mask) # (batch_size, context_len, hidden_size*2)
         question_hiddens = encoder.build_graph(self.qn_embs, self.qn_mask) # (batch_size, question_len, hidden_size*2)
 
-        # Compute similarity matrix. Don't forget to use the mask when necessary.
-        context_mask_3d = tf.cast(tf.expand_dims(self.context_mask, 2), tf.float32)  # (batch_size, context_len, 1)
-        masked_context_hiddens = tf.multiply(context_hiddens, context_mask_3d, name='masked_context_hiddens')  # (batch_size, context_len, hidden_size*2)
-        question_mask_3d = tf.cast(tf.expand_dims(self.qn_mask, 2), tf.float32)  # (batch_size, question_len, 1)
-        masked_question_hiddens = tf.multiply(question_hiddens, question_mask_3d, name='masked_question_hiddens')  # (batch_size, question_len, hidden_size*2)
-
-        W_sim_cq = tf.get_variable('W_sim_cq', shape=(1, 1, self.FLAGS.hidden_size * 2))
-        W_sim_c = tf.get_variable('W_sim_c', shape=(1, 1, self.FLAGS.hidden_size * 2))
-        W_sim_q = tf.get_variable('W_sim_q', shape=(1, 1, self.FLAGS.hidden_size * 2))
-
-        similarity_matrix_cq = tf.matmul(W_sim_cq * masked_context_hiddens, tf.transpose(masked_question_hiddens, perm=[0, 2, 1]))  # (batch_size, context_len, question_len)
-        similarity_matrix_c = tf.reduce_sum(masked_context_hiddens * W_sim_c, -1, keep_dims=True, name='similarity_matrix_c')  # (batch_size, context_len, 1)
-        similarity_matrix_q = tf.expand_dims(tf.reduce_sum(masked_question_hiddens * W_sim_q, -1), 1, name='similarity_matrix_q')  # (batch_size, 1, question_len)
-        similarity_matrix = similarity_matrix_cq + similarity_matrix_c + similarity_matrix_q  # (batch_size, context_len, question_len)
-
-        # c2q
-        c2q_attn_weights = tf.nn.softmax(similarity_matrix, 2, name='c2q_attn_weights')  # (batch_size, context_len, question_len)
-        c2q_attn = tf.matmul(c2q_attn_weights, masked_question_hiddens) # (batch_size, context_len, hidden_size*2)
-
-        # q2c
-        q2c_attn_max = tf.reduce_max(similarity_matrix, axis=2, name='q2c_attn_max')  # (batch_size, context_len)
-        q2c_attn_softmax = tf.expand_dims(tf.nn.softmax(q2c_attn_max), 1, name='q2c_attn_softmax')  # (batch_size, 1, context_len)
-        q2c_attn = tf.matmul(q2c_attn_softmax, masked_context_hiddens, name='q2c_attn')  # (batch_size, 1, hidden_size*2)
-
-        blended_reps = tf.concat([
-            masked_context_hiddens,
-            c2q_attn,
-            tf.tile(q2c_attn, [1, self.FLAGS.context_len, 1])
-        ], 2, name='blended_reps')  # (batch_size, context_len, hidden_size*6)
+        bidaf_attn = BidafAttn(self.keep_prob, self.FLAGS.context_len, 2 * self.FLAGS.hidden_size)
+        blended_reps = bidaf_attn.build_graph(question_hiddens, self.qn_mask, context_hiddens, self.context_mask)  # (batch_size, context_len, hidden_size*6)
 
         blended_reps_final = tf.contrib.layers.fully_connected(
             blended_reps,
