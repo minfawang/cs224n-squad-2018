@@ -145,8 +145,10 @@ class QAModel(object):
         )  # (batch_size, context_len, hidden_size)
 
         # Capture interactions among context words conditioned on the query.
-        model_encoder = RNNEncoder(self.FLAGS.hidden_size // 2, self.keep_prob)  # params: (hidden_size + hidden_size/2) * hidden_size/2 * 2 * 3
-        model_reps = model_encoder.build_graph(bidaf_output, self.context_mask, variable_scope='ModelEncoder')  # (batch_size, context_len, hidden_size)
+        model_encoder1 = RNNEncoder(self.FLAGS.hidden_size // 2, self.keep_prob)  # params: (hidden_size + hidden_size/2) * hidden_size/2 * 2 * 3
+        model_reps = model_encoder1.build_graph(bidaf_output, self.context_mask, variable_scope='ModelEncoder1')  # (batch_size, context_len, hidden_size)
+        model_encoder2 = RNNEncoder(self.FLAGS.hidden_size // 2, self.keep_prob)  # params: (hidden_size + hidden_size/2) * hidden_size/2 * 2 * 3
+        model_reps = model_encoder2.build_graph(model_reps, self.context_mask, variable_scope='ModelEncoder2')  # (batch_size, context_len, hidden_size)
 
         # Use softmax layer to compute probability distribution for start location
         # Note this produces self.logits_start and self.probdist_start, both of which have shape (batch_size, context_len)
@@ -164,6 +166,9 @@ class QAModel(object):
 
             softmax_layer_end = SimpleSoftmaxLayer()
             self.logits_end, self.probdist_end = softmax_layer_end.build_graph(end_reps, self.context_mask)
+
+        for variable in tf.trainable_variables():
+            tf.summary.histogram(variable.name, variable)
 
     def add_loss(self):
         """
