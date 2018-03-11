@@ -150,7 +150,7 @@ class BidafAttn(object):
             1s where there's real input, 0s where there's padding
 
         Outputs:
-          output: attention output. Tensor shape (batch_size, num_keys, hidden_size*3).
+          output: attention output. Tensor shape (batch_size, num_keys, hidden_size*4).
         """
         with tf.variable_scope('BidafAttn'):
             keys_mask_3d = tf.cast(tf.expand_dims(keys_mask, 2), tf.float32)  # (batch_size, num_keys, 1)
@@ -179,8 +179,9 @@ class BidafAttn(object):
             blended_reps = tf.concat([
                 masked_keys,
                 c2q_attn,
-                tf.tile(q2c_attn, [1, self.num_keys, 1])
-            ], 2)  # (batch_size, num_keys, value_vec_size*3)
+                masked_keys * c2q_attn,
+                masked_keys * q2c_attn,
+            ], 2)  # (batch_size, num_keys, value_vec_size*4)
 
             blended_reps = tf.nn.dropout(blended_reps, self.keep_prob)
 
