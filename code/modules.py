@@ -158,30 +158,39 @@ class BidafAttn(object):
             values_mask_3d = tf.cast(tf.expand_dims(values_mask, 2), tf.float32)  # (batch_size, num_values, 1)
             masked_values = tf.multiply(values, values_mask_3d, name='masked_values')  # (batch_size, num_values, value_vec_size)
 
-            W_sim_cq = tf.get_variable('W_sim_cq', shape=(1, 1, self.value_vec_size))
-            W_sim_c = tf.get_variable('W_sim_c', shape=(1, 1, self.value_vec_size))
-            W_sim_q = tf.get_variable('W_sim_q', shape=(1, 1, self.value_vec_size))
+            with tf.variable_scope('SimilarityMatrix'):
+                W_sim_cq = tf.get_variable('W_sim_cq', shape=(1, 1, self.value_vec_size))
+                W_sim_c = tf.get_variable('W_sim_c', shape=(1, 1, self.value_vec_size))
+                W_sim_q = tf.get_variable('W_sim_q', shape=(1, 1, self.value_vec_size))
 
-            similarity_matrix_cq = tf.matmul(W_sim_cq * masked_keys, tf.transpose(masked_values, perm=[0, 2, 1]))  # (batch_size, num_keys, num_values)
-            similarity_matrix_c = tf.reduce_sum(masked_keys * W_sim_c, -1, keep_dims=True, name='similarity_matrix_c')  # (batch_size, num_keys, 1)
-            similarity_matrix_q = tf.expand_dims(tf.reduce_sum(masked_values * W_sim_q, -1), 1, name='similarity_matrix_q')  # (batch_size, 1, num_values)
-            similarity_matrix = similarity_matrix_cq + similarity_matrix_c + similarity_matrix_q  # (batch_size, num_keys, num_values)
+                similarity_matrix_cq = tf.matmul(W_sim_cq * masked_keys, tf.transpose(masked_values, perm=[0, 2, 1]))  # (batch_size, num_keys, num_values)
+                similarity_matrix_c = tf.reduce_sum(masked_keys * W_sim_c, -1, keep_dims=True, name='similarity_matrix_c')  # (batch_size, num_keys, 1)
+                similarity_matrix_q = tf.expand_dims(tf.reduce_sum(masked_values * W_sim_q, -1), 1, name='similarity_matrix_q')  # (batch_size, 1, num_values)
+                similarity_matrix = similarity_matrix_cq + similarity_matrix_c + similarity_matrix_q  # (batch_size, num_keys, num_values)
 
             # c2q
-            c2q_attn_weights = tf.nn.softmax(similarity_matrix, 2, name='c2q_attn_weights')  # (batch_size, num_keys, num_values)
-            c2q_attn = tf.matmul(c2q_attn_weights, masked_values) # (batch_size, num_keys, value_vec_size)
+            with tf.variable_scope('C2QAttn'):
+                c2q_attn_weights = tf.nn.softmax(similarity_matrix, 2, name='c2q_attn_weights')  # (batch_size, num_keys, num_values)
+                c2q_attn = tf.matmul(c2q_attn_weights, masked_values) # (batch_size, num_keys, value_vec_size)
 
             # q2c
-            q2c_attn_max = tf.reduce_max(similarity_matrix, axis=2, name='q2c_attn_max')  # (batch_size, num_keys)
-            q2c_attn_softmax = tf.expand_dims(tf.nn.softmax(q2c_attn_max), 1, name='q2c_attn_softmax')  # (batch_size, 1, num_keys)
-            q2c_attn = tf.matmul(q2c_attn_softmax, masked_keys, name='q2c_attn')  # (batch_size, 1, value_vec_size)
+            with tf.variable_scope('Q2CAttn'):
+                q2c_attn_max = tf.reduce_max(similarity_matrix, axis=2, name='q2c_attn_max')  # (batch_size, num_keys)
+                q2c_attn_softmax = tf.expand_dims(tf.nn.softmax(q2c_attn_max), 1, name='q2c_attn_softmax')  # (batch_size, 1, num_keys)
+                q2c_attn = tf.matmul(q2c_attn_softmax, masked_keys, name='q2c_attn')  # (batch_size, 1, value_vec_size)
+
+            with tf.variable_scope('SelfAttn'):
+                mul_attn = MulAttn(self.keep_prob, self.value_vec_size, self.value_vec_size)
+                self_attn = mul_attn.build_graph(keys, keys_mask, keys, keys_mask)  # (batch_size, num_values, value_vec_size)
+
 
             blended_reps = tf.concat([
                 masked_keys,
                 c2q_attn,
                 masked_keys * c2q_attn,
                 masked_keys * q2c_attn,
-            ], 2)  # (batch_size, num_keys, value_vec_size*4)
+                self_attn,
+            ], 2)  # (batch_size, num_keys, value_vec_size*5)
 
             blended_reps = tf.nn.dropout(blended_reps, self.keep_prob)
 

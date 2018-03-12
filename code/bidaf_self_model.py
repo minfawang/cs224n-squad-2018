@@ -135,36 +135,36 @@ class QAModel(object):
 
         # Encode query-aware representations of the context words
         bidaf_attn = BidafAttn(self.keep_prob, self.FLAGS.context_len, self.FLAGS.hidden_size * 2)
-        bidaf_output = bidaf_attn.build_graph(question_hiddens, self.qn_mask, context_hiddens, self.context_mask)  # (batch_size, context_len, hidden_size*8)
+        bidaf_output = bidaf_attn.build_graph(question_hiddens, self.qn_mask, context_hiddens, self.context_mask)  # (batch_size, context_len, hidden_size*10)
 
-        # Condense the information: hidden_size*8 --> hidden_size
+        # Condense the information: hidden_size*10 --> hidden_size
         bidaf_output = tf.contrib.layers.fully_connected(
             bidaf_output,
             num_outputs=self.FLAGS.hidden_size,
             normalizer_fn=tf.contrib.layers.batch_norm
         )  # (batch_size, context_len, hidden_size)
 
-        # Self-attention to extract context word reps aware of the whole context.
-        self_attn = SelfAttn(self.keep_prob, self.FLAGS.hidden_size)
-        self_output = self_attn.build_graph(bidaf_output, self.context_mask)
-
-        # Another dimension reduction.
-        self_output = tf.contrib.layers.fully_connected(
-            self_output,
-            num_outputs=self.FLAGS.hidden_size,
-            normalizer_fn=tf.contrib.layers.batch_norm
-        )  # (batch_size, context_len, hidden_size)
+        # # Self-attention to extract context word reps aware of the whole context.
+        # self_attn = SelfAttn(self.keep_prob, self.FLAGS.hidden_size)
+        # self_output = self_attn.build_graph(bidaf_output, self.context_mask)
+        #
+        # # Another dimension reduction.
+        # self_output = tf.contrib.layers.fully_connected(
+        #     self_output,
+        #     num_outputs=self.FLAGS.hidden_size,
+        #     normalizer_fn=tf.contrib.layers.batch_norm
+        # )  # (batch_size, context_len, hidden_size)
 
         # Capture interactions among context words conditioned on the query.
         model_encoder1 = RNNEncoder(self.FLAGS.hidden_size // 2, self.keep_prob)  # params: (hidden_size + hidden_size/2) * hidden_size/2 * 2 * 3
-        model_reps = model_encoder1.build_graph(self_output, self.context_mask, variable_scope='ModelEncoder1')  # (batch_size, context_len, hidden_size)
+        model_reps = model_encoder1.build_graph(bidaf_output, self.context_mask, variable_scope='ModelEncoder1')  # (batch_size, context_len, hidden_size)
         model_encoder2 = RNNEncoder(self.FLAGS.hidden_size // 2, self.keep_prob)  # params: (hidden_size + hidden_size/2) * hidden_size/2 * 2 * 3
         model_reps = model_encoder2.build_graph(model_reps, self.context_mask, variable_scope='ModelEncoder2')  # (batch_size, context_len, hidden_size)
 
         # Use softmax layer to compute probability distribution for start location
         # Note this produces self.logits_start and self.probdist_start, both of which have shape (batch_size, context_len)
         with vs.variable_scope("StartDist"):
-            start_reps = tf.concat([self_output, model_reps], 2)  # (batch_size, context_len, hidden_size*2)
+            start_reps = tf.concat([bidaf_output, model_reps], 2)  # (batch_size, context_len, hidden_size*2)
             softmax_layer_start = SimpleSoftmaxLayer()
             self.logits_start, self.probdist_start = softmax_layer_start.build_graph(start_reps, self.context_mask)
 
@@ -175,15 +175,16 @@ class QAModel(object):
                 prob_start = tf.expand_dims(self.probdist_start, 2)  # (batch_size, context_len, 1)
                 attn_start = tf.reduce_sum(model_reps * prob_start, 1, keep_dims=True)  # (batch_size, 1, hidden_size)
 
-            end_inputs = tf.concat([self_output, model_reps, self_output * attn_start], 2)  # (batch_size, context_len, 3 * hidden_size)
-            end_inputs = tf.contrib.layers.fully_connected(
-                end_inputs,
-                num_outputs=self.FLAGS.hidden_size,
-                normalizer_fn=tf.contrib.layers.batch_norm
-            )  # (batch_size, context_len, hidden_size)
+            # end_inputs = tf.concat([bidaf_output, model_reps, bidaf_output * attn_start], 2)  # (batch_size, context_len, 3 * hidden_size)
+            # end_inputs = tf.contrib.layers.fully_connected(
+            #     end_inputs,
+            #     num_outputs=self.FLAGS.hidden_size,
+            #     normalizer_fn=tf.contrib.layers.batch_norm
+            # )  # (batch_size, context_len, hidden_size)
 
             end_encoder = RNNEncoder(self.FLAGS.hidden_size // 2, self.keep_prob)
-            end_reps = end_encoder.build_graph(end_inputs, self.context_mask, variable_scope='EndEncoder')  # (batch_size, context_len, hidden_size)
+            end_reps = end_encoder.build_graph(model_reps, self.context_mask, variable_scope='EndEncoder')  # (batch_size, context_len, hidden_size)
+            end_reps = tf.concat([bidaf_output, end_reps, end_reps * attn_start], 2)  # (batch_size, context_len, 3*hidden_size)
 
             softmax_layer_end = SimpleSoftmaxLayer()
             self.logits_end, self.probdist_end = softmax_layer_end.build_graph(end_reps, self.context_mask)
