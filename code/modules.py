@@ -187,6 +187,29 @@ class BidafAttn(object):
 
             return blended_reps
 
+
+class SelfAttn(object):
+    """Self matching attention.
+    """
+    def __init__(self, keep_prob, value_vec_size):
+        self.keep_prob = keep_prob
+        self.value_vec_size = value_vec_size
+
+    def build_graph(self, values, values_mask):
+        """
+        Inputs:
+          values: (batch_size, num_values, value_vec_size).
+          values_mask: (batch_size, num_values).
+
+        Outputs:
+          Returns concat([values, self_attn_values], 2)
+        """
+        with tf.variable_scope('SelfAttn'):
+            self_attn = MulAttn(self.keep_prob, self.value_vec_size, self.value_vec_size)
+            self_output = self_attn.build_graph(values, values_mask, values, values_mask)  # (batch_size, num_values, value_vec_size)
+            return tf.concat([values, self_output], 2)  # (batch_size, context_len, value_vec_size * 2)
+
+
 class BasicAttn(object):
     """Module for basic attention.
 
@@ -273,7 +296,7 @@ class MulAttn(object):
         self.key_vec_size = key_vec_size
         self.value_vec_size = value_vec_size
 
-    def build_graph(self, values, values_mask, keys):
+    def build_graph(self, values, values_mask, keys, keys_mask):
         """
         Keys attend to values.
         For each key, return an attention distribution and an attention output vector.
@@ -285,41 +308,25 @@ class MulAttn(object):
           keys: Tensor shape (batch_size, num_keys, key_vec_size)
 
         Outputs:
-          attn_logits: Tensor shape (batch_size, num_keys, num_values).
-            The logits of attn_dist.
-          attn_dist: Tensor shape (batch_size, num_keys, num_values).
-            For each key, the distribution should sum to 1,
-            and should be 0 in the value locations that correspond to padding.
           output: Tensor shape (batch_size, num_keys, hidden_size).
             This is the attention output; the weighted sum of the values
             (using the attention distribution as weights).
         """
         with vs.variable_scope("MulAttn"):
-            # Calculate attention distribution
-            # TODO(minfa): Check initialization of W_attn. Did they inherit
-            # default initialization method or are they initialized as zeros.
-            W_attn = tf.get_variable('W_attn', shape=(self.value_vec_size, self.key_vec_size))
-            tf.summary.histogram('W_attn', W_attn)
-
-            keys_t = tf.transpose(keys, perm=[2, 0, 1])  # shape (key_vec_size, batch_size, num_keys)
-            keys_t = tf.reshape(keys_t, (self.key_vec_size, -1))  # shape (key_vec_size, batch_size * num_keys)
-            attn_logits = tf.matmul(W_attn, keys_t)  # shape (value_vec_size, batch_size * num_keys)
-            attn_logits = tf.reshape(attn_logits, (self.value_vec_size, tf.shape(keys)[0], tf.shape(keys)[1]))  # shape (value_vec_size, batch_size, num_keys)
-            attn_logits = tf.transpose(attn_logits, perm=[1, 2, 0])  # shape (batch_size, num_keys, value_vec_size)
-
-            values_t = tf.transpose(values, perm=[0, 2, 1]) # (batch_size, value_vec_size, num_values)
-            attn_logits = tf.matmul(attn_logits, values_t) # shape (batch_size, num_keys, num_values)
-
-            attn_logits_mask = tf.expand_dims(values_mask, 1) # shape (batch_size, 1, num_values)
-            attn_logits, attn_dist = masked_softmax(attn_logits, attn_logits_mask, 2) # shape (batch_size, num_keys, num_values). take softmax over values
-
             # Use attention distribution to take weighted sum of values
-            output = tf.matmul(attn_dist, values) # shape (batch_size, num_keys, value_vec_size)
+            W = tf.get_variable('W_attn', shape=(self.key_vec_size, self.value_vec_size))
+            keys_mask_3d = tf.cast(tf.expand_dims(keys_mask, 2), tf.float32)
+            values_mask_3d = tf.cast(tf.expand_dims(values_mask, 2), tf.float32)
+            masked_keys = keys * keys_mask_3d  # (batch_size, num_keys, key_vec_size)
+            masked_vals = values * values_mask_3d  # (batch_size, num_values, value_vec_size)
+
+            combined = tf.tensordot(masked_keys, W, [[2], [0]])  # (batch_size, num_keys, self.value_vec_size)
+            combined = tf.matmul(combined, tf.transpose(masked_vals, perm=[0, 2, 1]))  # (batch_size, num_keys, num_values)
 
             # Apply dropout
-            output = tf.nn.dropout(output, self.keep_prob)
+            output = tf.nn.dropout(combined, self.keep_prob)
 
-            return attn_logits, attn_dist, output
+            return output
 
 
 def masked_softmax(logits, mask, dim):
