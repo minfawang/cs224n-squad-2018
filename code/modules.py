@@ -191,6 +191,9 @@ class BidafAttn(object):
                 masked_keys * q2c_attn,
                 self_attn,
             ], 2)  # (batch_size, num_keys, value_vec_size*5)
+            tf.assert_equal(
+                blended_reps.get_shape().as_list()[1:],
+                [self.num_keys, self.value_vec_size * 5])
 
             blended_reps = tf.nn.dropout(blended_reps, self.keep_prob)
 
@@ -329,11 +332,16 @@ class MulAttn(object):
             masked_keys = keys * keys_mask_3d  # (batch_size, num_keys, key_vec_size)
             masked_vals = values * values_mask_3d  # (batch_size, num_values, value_vec_size)
 
-            combined = tf.tensordot(masked_keys, W, [[2], [0]])  # (batch_size, num_keys, self.value_vec_size)
-            combined = tf.matmul(combined, tf.transpose(masked_vals, perm=[0, 2, 1]))  # (batch_size, num_keys, num_values)
+            attn_logits = tf.tensordot(masked_keys, W, [[2], [0]])  # (batch_size, num_keys, self.value_vec_size)
+            attn_logits = tf.matmul(attn_logits, tf.transpose(masked_vals, perm=[0, 2, 1]))  # (batch_size, num_keys, num_values)
+            # Logits divided by sqrt(dim) proposed from "Attention is all you need".
+            # http://ruder.io/deep-learning-nlp-best-practices/index.html#attention
+            attn_dist = tf.nn.softmax(attn_logits / tf.sqrt(tf.cast(self.key_vec_size, tf.float32)), 2)
+
+            output = tf.matmul(attn_dist, masked_vals) # (batch_size, num_keys, value_vec_size)
 
             # Apply dropout
-            output = tf.nn.dropout(combined, self.keep_prob)
+            output = tf.nn.dropout(output, self.keep_prob)
 
             return output
 

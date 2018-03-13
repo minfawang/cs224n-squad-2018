@@ -174,6 +174,9 @@ class QAModel(object):
             with vs.variable_scope('StartAttn'):
                 prob_start = tf.expand_dims(self.probdist_start, 2)  # (batch_size, context_len, 1)
                 attn_start = tf.reduce_sum(model_reps * prob_start, 1, keep_dims=True)  # (batch_size, 1, hidden_size)
+                tf.assert_equal(
+                    attn_start.get_shape().as_list()[1:],
+                    [1, self.FLAGS.hidden_size])
 
             # end_inputs = tf.concat([bidaf_output, model_reps, bidaf_output * attn_start], 2)  # (batch_size, context_len, 3 * hidden_size)
             # end_inputs = tf.contrib.layers.fully_connected(
@@ -184,7 +187,13 @@ class QAModel(object):
 
             end_encoder = RNNEncoder(self.FLAGS.hidden_size // 2, self.keep_prob)
             end_reps = end_encoder.build_graph(model_reps, self.context_mask, variable_scope='EndEncoder')  # (batch_size, context_len, hidden_size)
-            end_reps = tf.concat([bidaf_output, end_reps, end_reps * attn_start], 2)  # (batch_size, context_len, 3*hidden_size)
+            end_reps = tf.concat([
+                bidaf_output,
+                end_reps,
+                tf.tile(attn_start, [1, self.FLAGS.context_len, 1])], 2)  # (batch_size, context_len, 3*hidden_size)
+            tf.assert_equal(
+                end_reps.get_shape().as_list()[1:],
+                [self.FLAGS.context_len, 3 * self.FLAGS.hidden_size])
 
             softmax_layer_end = SimpleSoftmaxLayer()
             self.logits_end, self.probdist_end = softmax_layer_end.build_graph(end_reps, self.context_mask)
