@@ -375,7 +375,7 @@ class QAModel(object):
             beam_search(start_prob_idxs, end_prob_idxs)
             for start_prob_idxs, end_prob_idxs
             in zip(start_prob_idx_pairs, end_prob_idx_pairs)]
-        start_pos, end_pos = list(zip(*start_end_pos_pairs))
+        start_pos, end_pos = np.array(zip(*start_end_pos_pairs))
 
         return start_pos, end_pos
 
