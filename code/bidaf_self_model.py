@@ -349,12 +349,12 @@ class QAModel(object):
         def nlargest(start_dist_example):
             return heapq.nlargest(top_n, enumerate(start_dist_example), lambda (i, prob): (prob, i))
 
-        def beam_search(top_start_prob_idxs, top_end_prob_idxs):
+        def beam_search(top_start_idx_probs, top_end_idx_probs):
             """Find the (start_i, end_i) pair that end_i >= start_i and start_prob + end_prob is max.
             """
             max_prob, max_pair = 0.0, None
-            for start_prob, start_i in top_start_prob_idxs:
-                for end_prob, end_i in top_end_prob_idxs:
+            for start_i, start_prob in top_start_idx_probs:
+                for end_i, end_prob in top_end_idx_probs:
                     if end_i < start_i:
                         continue
                     cur_prob = start_prob + end_prob
@@ -369,12 +369,12 @@ class QAModel(object):
             return max_pair
 
 
-        start_prob_idx_pairs = map(nlargest, start_dist)
-        end_prob_idx_pairs = map(nlargest, end_dist)
+        start_idx_prob_pairs = map(nlargest, start_dist)
+        end_idx_prob_pairs = map(nlargest, end_dist)
         start_end_pos_pairs = [
             beam_search(start_prob_idxs, end_prob_idxs)
             for start_prob_idxs, end_prob_idxs
-            in zip(start_prob_idx_pairs, end_prob_idx_pairs)]
+            in zip(start_idx_prob_pairs, end_idx_prob_pairs)]
         start_pos, end_pos = np.array(zip(*start_end_pos_pairs))
 
         return start_pos, end_pos

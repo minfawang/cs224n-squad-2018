@@ -261,8 +261,14 @@ def generate_answers(session, model, word2id, qn_uuid_data, context_token_data, 
             context_tokens = batch.context_tokens[ex_idx] # list of strings
 
             # Check the predicted span is in range
-            assert pred_start in range(len(context_tokens))
-            assert pred_end in range(len(context_tokens))
+            try:
+                assert pred_start in range(len(context_tokens))
+                assert pred_end in range(len(context_tokens))
+            except:
+                print('pred_start: "{}"'.format(pred_start))
+                print('pred_end: "{}"'.format(pred_end))
+                print('len(context_tokens): "{}"'.format(len(context_tokens)))
+                exit(1)
 
             # Predicted answer tokens
             pred_ans_tokens = context_tokens[pred_start : pred_end +1] # list of strings
