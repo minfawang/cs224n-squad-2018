@@ -344,7 +344,7 @@ class QAModel(object):
         # end_pos = np.argmax(end_dist, axis=1)
         assert start_dist.shape == (batch.batch_size, self.FLAGS.context_len)
         assert end_dist.shape == (batch.batch_size, self.FLAGS.context_len)
-        top_n = self.FALGS.beam_search_size
+        top_n = self.FLAGS.beam_search_size
 
         def nlargest(start_dist_example):
             return heapq.nlargest(top_n, enumerate(start_dist_example), lambda (i, prob): (prob, i))
