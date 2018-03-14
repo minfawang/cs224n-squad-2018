@@ -21,6 +21,7 @@ import time
 import logging
 import os
 import sys
+import heapq
 
 import numpy as np
 import tensorflow as tf
@@ -338,9 +339,39 @@ class QAModel(object):
         # Get start_dist and end_dist, both shape (batch_size, context_len)
         start_dist, end_dist = self.get_prob_dists(session, batch)
 
-        # Take argmax to get start_pos and end_post, both shape (batch_size)
-        start_pos = np.argmax(start_dist, axis=1)
-        end_pos = np.argmax(end_dist, axis=1)
+        # # Take argmax to get start_pos and end_post, both shape (batch_size)
+        # start_pos = np.argmax(start_dist, axis=1)
+        # end_pos = np.argmax(end_dist, axis=1)
+        assert start_dist.shape == (batch.batch_size, self.FLAGS.context_len)
+        assert end_dist.shape == (batch.batch_size, self.FLAGS.context_len)
+        top_n = self.FALGS.beam_search_size
+
+        def nlargest(start_dist_example):
+            return heapq.nlargest(top_n, enumerate(start_dist_example), lambda (i, prob): (prob, i))
+
+        def beam_search(top_start_prob_idxs, top_end_prob_idxs):
+            """Find the (start_i, end_i) pair that end_i >= start_i and start_prob + end_prob is max.
+            """
+            max_prob, max_pair = 0.0, None
+            for start_prob, start_i in top_start_prob_idxs:
+                for end_prob, end_i in top_end_prob_idxs:
+                    if end_i < start_i:
+                        continue
+                    cur_prob = start_prob + end_prob
+                    cur_pair = (start_i, end_i)
+                    if cur_prob > max_prob:
+                        max_prob, max_pair = cur_prob, cur_pair
+
+            if max_pair is None:
+                i = start_i if start_prob > end_prob else end_i
+                return (i, i)
+
+            return max_pair
+
+
+        start_prob_idx_pairs = map(nlargest, start_dist)
+        end_prob_idx_pairs = map(nlargest, end_dist)
+
 
         return start_pos, end_pos
 
