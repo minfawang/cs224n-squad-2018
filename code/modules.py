@@ -240,21 +240,15 @@ class BidafAttn(object):
                 q2c_attn_softmax = tf.expand_dims(tf.nn.softmax(q2c_attn_max), 1, name='q2c_attn_softmax')  # (batch_size, 1, num_keys)
                 q2c_attn = tf.matmul(q2c_attn_softmax, masked_keys, name='q2c_attn')  # (batch_size, 1, value_vec_size)
 
-            with tf.variable_scope('SelfAttn'):
-                mul_attn = MulAttn(self.keep_prob, self.value_vec_size, self.value_vec_size)
-                self_attn = mul_attn.build_graph(keys, keys_mask, keys, keys_mask)  # (batch_size, num_values, value_vec_size)
-
-
             blended_reps = tf.concat([
                 masked_keys,
                 c2q_attn,
                 masked_keys * c2q_attn,
                 masked_keys * q2c_attn,
-                self_attn,
             ], 2)  # (batch_size, num_keys, value_vec_size*5)
             tf.assert_equal(
                 blended_reps.get_shape().as_list()[1:],
-                [self.num_keys, self.value_vec_size * 5])
+                [self.num_keys, self.value_vec_size * 4])
 
             blended_reps = tf.nn.dropout(blended_reps, self.keep_prob)
 
