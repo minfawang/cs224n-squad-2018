@@ -121,6 +121,67 @@ class SimpleSoftmaxLayer(object):
             return masked_logits, prob_dist
 
 
+class CoAttn(object):
+    def __init__(self, keep_prob, hidden_size, value_vec_size):
+        self.keep_prob = keep_prob
+        self.hidden_size = hidden_size
+        self.value_vec_size = value_vec_size
+
+    def build_graph(self, values, values_mask, keys, keys_mask):
+        """
+        values: (batch_size, num_values, value_vec_size).
+        values_mask: (batch_size, num_values).
+        keys: (batch_size, num_keys, key_vec_size).
+        keys_mask: (batch_size, num_keys).
+
+        Keys are like context. Values are like question.
+        """
+        with tf.variable_scope('CoAttn'):
+            keys_mask_3d = tf.cast(tf.expand_dims(keys_mask, 2), tf.float32)  # (batch_size, num_keys, 1)
+            masked_keys = tf.multiply(keys, keys_mask_3d, name='masked_keys')  # (batch_size, num_keys, value_vec_size)
+            values_mask_3d = tf.cast(tf.expand_dims(values_mask, 2), tf.float32)  # (batch_size, num_values, 1)
+            masked_values = tf.multiply(values, values_mask_3d, name='masked_values')  # (batch_size, num_values, value_vec_size)
+
+            batch_size = tf.shape(values)[0]
+            keys_h = tf.contrib.layers.fully_connected(masked_keys, self.value_vec_size)  # (batch_size, num_keys, value_vec_size)
+            k0 = tf.get_variable('k0', shape=(1, 1, self.value_vec_size))
+            keys_h = tf.concat([
+                tf.tile(k0, [batch_size, 1, 1]),
+                keys_h], 1)  # (batch_size, num_keys + 1, value_vec_size)
+
+            v0 = tf.get_variable('v0', shape=(1, 1, self.value_vec_size))
+            vals_h = tf.concat([
+                tf.tile(v0, [batch_size, 1, 1]),
+                masked_values], 1)  # (batch_size, num_values + 1, value_vec_size)
+            vals_h = tf.transpose(vals_h, [0, 2, 1])  # (batch_size, value_vec_size, num_values + 1)
+
+            # Compute affinity matrix.
+            L = tf.matmul(keys_h, vals_h)  # (batch_size, num_keys + 1, num_values + 1)
+
+            # C2Q: key to value.
+            a_prob = tf.nn.softmax(L, 2)  # (batch_size, num_keys + 1, num_values + 1)
+            a = tf.matmul(a_prob, tf.transpose(vals_h, [0, 2, 1]))  # (batch_size, num_keys + 1, value_vec_size)
+
+            # Q2C: value to key.
+            b_prob = tf.nn.softmax(L, 1)  # (batch_size, num_keys + 1, num_values + 1)
+            b = tf.matmul(tf.transpose(b_prob, [0, 2, 1]), keys_h)  # (batch_size, num_values + 1, value_vec_size)
+
+            # Use C2Q a_prob to take weighted sum of Q2C attention.
+            s = tf.matmul(a_prob, b)  # (batch_size, num_keys + 1, value_vec_size)
+            s_mask = tf.concat([
+              tf.ones((batch_size, 1), tf.int32),
+              keys_mask], 1)  # (batch_size, num_keys + 1)
+
+            tf.concat([s, a], 2)  # (batch_size, num_keys + 1, value_vec_size*2)
+
+            gru = RNNEncoder(self.hidden_size, self.keep_prob)
+            output = gru.build_graph(s, s_mask)[:, :-1, :]  # (batch_size, num_keys, hidden_size*2)
+
+            tf.assert_equal(tf.shape(output), (batch_size, keys.get_shape()[1], self.hidden_size * 2))
+
+            return output
+
+
 class BidafAttn(object):
     """Model for attention described in Bidaf(bi-directional attention flow).
     """
