@@ -27,6 +27,46 @@ _START_VOCAB = [_PAD, _UNK]
 PAD_ID = 0
 UNK_ID = 1
 
+# Hard code this dictionary here.
+_CHAR_PAD = '\x00'
+_CHAR_UNK = '\x11'
+CHAR_PAD_ID = 0
+CHAR_UNK_ID = 1
+
+# Threshold, imp > 1000. Only lose 0.1% imp, removed 40 char.
+CHAR_DICT = ['\xc4', '\xd8', '[', '\xd0', 'o', '\xe8', 'k', 'g', '\xe0', 'c', 
+             'w', 's', '\x8c', '\x88', '\x84', '\x80', '\x9c', '\x94', '\x90', 
+             '\xac', '/', '\xa8', '+', '\xa4', "'", '\xa0', '\xbc', '?', 
+             '\xb8', ';', '\xb4', '7', '\xb0', '3', '\xcf', '\xcb', '\xc3', 
+             '\xd7', 'l', 'h', 'd', '\xe7', '\xe3', 'x', 't', 'p', '\x87', 
+             '\x83', '\x9f', '\x9b', '\x97', '\x93', ',', '\xaf', '(', '\xab', 
+             '$', '\xa7', '\xa3', '\xbf', '8', '\xbb', '4', '\xb7', '0', 
+             '\xb3', '\xce', '\xca', '\xc2', ']', 'm', 'i', 'e', '\xe6', 'a', 
+             '\xe2', 'y', 'u', 'q', '\x8e', '\x8a', '\x82', '\x92', '-', 
+             '\xae', ')', '\xaa', '%', '\xa6', '!', '\xa2', '\xbe', '9', 
+             '\xba', '5', '\xb6', '1', '\xb2', '\xc9', '\xc5', '\xd9', '\xd1',
+             'n', 'j', '\xe5', 'f', '\xe1', 'b', 'z', 'v', 'r', '\x8d', '\x89', 
+             '\x85', '\x81', '\x9d', '\x99', '\x91', '\xad', '.', '\xa9',
+             '\xa5', '&', '\xa1', '"', '\xbd', '\xb9', ':', '\xb5', '6', '\xb1',
+             '2']
+
+def get_char_mapping():
+  """Return hard coded char2id and id2char mapping for en/US
+  """
+  char2id = {}
+  id2char = {}
+  
+  char2id[_CHAR_PAD] = CHAR_PAD_ID
+  char2id[_CHAR_UNK] = CHAR_UNK_ID
+  id2char[CHAR_PAD_ID] = _CHAR_PAD
+  id2char[CHAR_UNK_ID] = _CHAR_UNK
+  
+  for i in range(0, len(CHAR_DICT)):
+    idx = i+2
+    char2id[CHAR_DICT[i]] = idx
+    id2char[idx] = CHAR_DICT[i]
+  
+  return char2id, id2char
 
 def get_glove(glove_path, glove_dim):
     """Reads from original GloVe .txt file and returns embedding matrix and
@@ -82,3 +122,4 @@ def get_glove(glove_path, glove_dim):
     assert idx == final_vocab_size
 
     return emb_matrix, word2id, id2word
+

@@ -26,7 +26,7 @@ import logging
 import tensorflow as tf
 
 from qa_model import QAModel
-from vocab import get_glove
+from vocab import get_glove, get_char_mapping
 from official_eval_helper import get_json_data, generate_answers
 
 
@@ -52,6 +52,13 @@ tf.app.flags.DEFINE_integer("hidden_size", 200, "Size of the hidden states")
 tf.app.flags.DEFINE_integer("context_len", 600, "The maximum context length of your model")
 tf.app.flags.DEFINE_integer("question_len", 30, "The maximum question length of your model")
 tf.app.flags.DEFINE_integer("embedding_size", 100, "Size of the pretrained word vectors. This needs to be one of the available GloVe dimensions: 50/100/200/300")
+
+# For CNN
+tf.app.flags.DEFINE_integer("enable_cnn", false, "Flag to control CNN.")
+tf.app.flags.DEFINE_integer("char_embedding_size", 20, "Size of the character embeddings.")
+tf.app.flags.DEFINE_integer("word_len", 10, "the maximum word length.")
+tf.app.flags.DEFINE_integer("cnn_filters", 100, "the number of filters for char CNN.")
+tf.app.flags.DEFINE_integer("cnn_kernel_size", 5, "the kernel size for char CNN.")
 
 # How often to print, save, eval
 tf.app.flags.DEFINE_integer("print_every", 1, "How many iterations to do per print.")
@@ -123,6 +130,9 @@ def main(unused_argv):
 
     # Load embedding matrix and vocab mappings
     emb_matrix, word2id, id2word = get_glove(FLAGS.glove_path, FLAGS.embedding_size)
+    
+    # Build character level embedding matrix and vocab mappings
+    char2id, id2char = get_char_mapping(FLAGS.char_embs_path)
 
     # Get filepaths to train/dev datafiles for tokenized queries, contexts and answers
     train_context_path = os.path.join(FLAGS.data_dir, "train.context")
@@ -133,7 +143,7 @@ def main(unused_argv):
     dev_ans_path = os.path.join(FLAGS.data_dir, "dev.span")
 
     # Initialize model
-    qa_model = QAModel(FLAGS, id2word, word2id, emb_matrix)
+    qa_model = QAModel(FLAGS, id2word, word2id, emb_matrix, char2id ,id2char)
 
     # Some GPU settings
     config=tf.ConfigProto()
@@ -191,7 +201,7 @@ def main(unused_argv):
 
             # Get a predicted answer for each example in the data
             # Return a mapping answers_dict from uuid to answer
-            answers_dict = generate_answers(sess, qa_model, word2id, qn_uuid_data, context_token_data, qn_token_data)
+            answers_dict = generate_answers(sess, qa_model, word2id, char2id, qn_uuid_data, context_token_data, qn_token_data)
 
             # Write the uuid->answer mapping a to json file in root dir
             print "Writing predictions to %s..." % FLAGS.json_out_path
@@ -205,3 +215,4 @@ def main(unused_argv):
 
 if __name__ == "__main__":
     tf.app.run()
+
