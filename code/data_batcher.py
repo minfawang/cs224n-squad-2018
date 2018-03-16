@@ -142,7 +142,7 @@ def refill_batches(batches, word2id, char2id, context_file, qn_file, ans_file, b
         ans_span = intstr_to_intlist(ans_line)
         
         # Convert tokens to character ids
-        context_char_ids = token_to_padded_character_ids(context_tokens, char2id)
+        context_char_ids = token_to_padded_character_ids(context_tokens, char2id, word_len)
         qn_char_ids = token_to_padded_character_ids(qn_tokens, char2id, word_len)
 
         # read the next line from each file
