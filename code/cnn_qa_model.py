@@ -98,8 +98,8 @@ class QAModel(object):
         
         ## placeholder for character level embeddings.
         ## shape (batch_size*context_len, word_len)
-        self.context_char_ids = tf.placeholder(tf.int32, shape=[None, self.FLAGS.word_len])
-        self.qn_char_ids = tf.placeholder(tf.int32, shape=[None, self.FLAGS.word_len])
+        self.context_char_ids = tf.placeholder(tf.int32, shape=[None, self.FLAGS.context_len, self.FLAGS.word_len])
+        self.qn_char_ids = tf.placeholder(tf.int32, shape=[None, self.FLAGS.qn_len, self.FLAGS.word_len])
 
         # Add a placeholder to feed in the keep probability (for dropout).
         # This is necessary so that we can instruct the model to use dropout when training, but not when testing
