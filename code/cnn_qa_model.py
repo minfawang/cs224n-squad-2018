@@ -98,8 +98,9 @@ class QAModel(object):
         
         ## placeholder for character level embeddings.
         ## shape (batch_size, context_len, word_len)
-        self.context_char_ids = tf.placeholder(tf.int32, shape=[None, self.FLAGS.context_len, self.FLAGS.word_len])
-        self.qn_char_ids = tf.placeholder(tf.int32, shape=[None, self.FLAGS.question_len, self.FLAGS.word_len])
+        if self.FLAGS.enable_cnn:
+            self.context_char_ids = tf.placeholder(tf.int32, shape=[None, self.FLAGS.context_len, self.FLAGS.word_len])
+            self.qn_char_ids = tf.placeholder(tf.int32, shape=[None, self.FLAGS.question_len, self.FLAGS.word_len])
 
         # Add a placeholder to feed in the keep probability (for dropout).
         # This is necessary so that we can instruct the model to use dropout when training, but not when testing
@@ -186,8 +187,8 @@ class QAModel(object):
         context_embs = self.context_embs
         qn_embs = self.qn_embs
         if self.FLAGS.enable_cnn:
-          context_embs =  tf.concat([self.context_embs, self.context_char_embs], axis=2)
-          qn_embs = tf.concat([self.qn_embs, self.qn_char_embs], axis=2)
+            context_embs =  tf.concat([self.context_embs, self.context_char_embs], axis=2)
+            qn_embs = tf.concat([self.qn_embs, self.qn_char_embs], axis=2)
         
         context_hiddens = encoder.build_graph(context_embs, self.context_mask) # (batch_size, context_len, hidden_size*2)
         question_hiddens = encoder.build_graph(qn_embs, self.qn_mask) # (batch_size, question_len, hidden_size*2)
@@ -278,8 +279,9 @@ class QAModel(object):
         input_feed[self.keep_prob] = 1.0 - self.FLAGS.dropout # apply dropout
         
         # Feed for character level CNN
-        input_feed[self.context_char_ids] = batch.context_char_ids
-        input_feed[self.qn_char_ids] = batch.qn_char_ids
+        if self.FLAGS.enable_cnn:
+            input_feed[self.context_char_ids] = batch.context_char_ids
+            input_feed[self.qn_char_ids] = batch.qn_char_ids
         
         # output_feed contains the things we want to fetch.
         output_feed = [self.updates, self.summaries, self.loss, self.global_step, self.param_norm, self.gradient_norm]
@@ -312,8 +314,10 @@ class QAModel(object):
         input_feed[self.qn_mask] = batch.qn_mask
         input_feed[self.ans_span] = batch.ans_span
         
-        input_feed[self.context_char_ids] = batch.context_char_ids
-        input_feed[self.qn_char_ids] = batch.qn_char_ids
+        if self.FLAGS.enable_cnn:
+            input_feed[self.context_char_ids] = batch.context_char_ids
+            input_feed[self.qn_char_ids] = batch.qn_char_ids
+        
         # note you don't supply keep_prob here, so it will default to 1 i.e. no dropout
 
         output_feed = [self.loss]
@@ -340,8 +344,9 @@ class QAModel(object):
         input_feed[self.qn_ids] = batch.qn_ids
         input_feed[self.qn_mask] = batch.qn_mask
         
-        input_feed[self.context_char_ids] = batch.context_char_ids
-        input_feed[self.qn_char_ids] = batch.qn_char_ids
+        if self.FLAGS.enable_cnn:
+            input_feed[self.context_char_ids] = batch.context_char_ids
+            input_feed[self.qn_char_ids] = batch.qn_char_ids
         
         # note you don't supply keep_prob here, so it will default to 1 i.e. no dropout
 
