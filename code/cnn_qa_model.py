@@ -97,7 +97,7 @@ class QAModel(object):
         self.ans_span = tf.placeholder(tf.int32, shape=[None, 2])
         
         ## placeholder for character level embeddings.
-        ## shape (batch_size*context_len, word_len)
+        ## shape (batch_size, context_len, word_len)
         self.context_char_ids = tf.placeholder(tf.int32, shape=[None, self.FLAGS.context_len, self.FLAGS.word_len])
         self.qn_char_ids = tf.placeholder(tf.int32, shape=[None, self.FLAGS.question_len, self.FLAGS.word_len])
 
@@ -137,9 +137,10 @@ class QAModel(object):
                 tf.random_uniform([vocab_size, self.FLAGS.char_embedding_size], -1.0, 1.0), 
                 name="char_emb_matrix")
 
-            # TODO(binbinx): add a dropout layer.
             context_char_embs = embedding_ops.embedding_lookup(char_emb_matrix, self.context_char_ids) # shape (batch_size, context_len, word_len, embedding_size)
-            context_conv = tf.layers.conv1d(tf.reshape(context_char_embs, [-1, self.FLAGS.word_len, self.FLAGS.char_embedding_size]), 
+            context_drop = tf.layers.dropout(tf.reshape(context_char_embs, 
+                                                        [-1, self.FLAGS.word_len, self.FLAGS.char_embedding_size]), rate=1-self.keep_prob)
+            context_conv = tf.layers.conv1d(context_drop, 
                                             self.FLAGS.cnn_filters, 
                                             self.FLAGS.cnn_kernel_size, 
                                             padding='valid', 
@@ -149,7 +150,9 @@ class QAModel(object):
                                                 [-1, self.FLAGS.context_len, self.FLAGS.cnn_filters]) # shape (batch_size, context_len, filter)
             
             qn_char_embs = embedding_ops.embedding_lookup(char_emb_matrix, self.qn_char_ids) # shape (batch_size, question_len, word_len, embedding_size)
-            qn_conv = tf.layers.conv1d(tf.reshape(qn_char_embs, [-1, self.FLAGS.word_len, self.FLAGS.char_embedding_size]), 
+            qn_drop = tf.layers.dropout(tf.reshape(qn_char_embs, 
+                                                   [-1, self.FLAGS.word_len, self.FLAGS.char_embedding_size]), rate=1-self.keep_prob)
+            qn_conv = tf.layers.conv1d(qn_drop, 
                                        self.FLAGS.cnn_filters, 
                                        self.FLAGS.cnn_kernel_size, 
                                        padding='valid', 
@@ -302,6 +305,9 @@ class QAModel(object):
         input_feed[self.qn_ids] = batch.qn_ids
         input_feed[self.qn_mask] = batch.qn_mask
         input_feed[self.ans_span] = batch.ans_span
+        
+        input_feed[self.context_char_ids] = batch.context_char_ids
+        input_feed[self.qn_char_ids] = batch.qn_char_ids
         # note you don't supply keep_prob here, so it will default to 1 i.e. no dropout
 
         output_feed = [self.loss]
@@ -327,6 +333,10 @@ class QAModel(object):
         input_feed[self.context_mask] = batch.context_mask
         input_feed[self.qn_ids] = batch.qn_ids
         input_feed[self.qn_mask] = batch.qn_mask
+        
+        input_feed[self.context_char_ids] = batch.context_char_ids
+        input_feed[self.qn_char_ids] = batch.qn_char_ids
+        
         # note you don't supply keep_prob here, so it will default to 1 i.e. no dropout
 
         output_feed = [self.probdist_start, self.probdist_end]
