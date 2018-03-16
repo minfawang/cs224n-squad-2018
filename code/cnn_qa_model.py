@@ -154,7 +154,7 @@ class QAModel(object):
                                        self.FLAGS.cnn_kernel_size, 
                                        padding='valid', 
                                        activation=tf.nn.relu) # shape (batch_size*question_len, word_len-kernel+1, filter)
-            qn_char_cnn = tf.reduce_max(context_conv, axis=1) # shape (batch_size*question_len, filter)
+            qn_char_cnn = tf.reduce_max(qn_conv, axis=1) # shape (batch_size*question_len, filter)
             self.qn_char_embs = tf.reshape(qn_char_cnn,
                                            [-1, self.FLAGS.question_len, self.FLAGS.cnn_filters]) # shape (batch_size, question_len, filter)
     
