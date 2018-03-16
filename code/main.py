@@ -49,14 +49,14 @@ tf.app.flags.DEFINE_float("max_gradient_norm", 5.0, "Clip gradients to this norm
 tf.app.flags.DEFINE_float("dropout", 0.15, "Fraction of units randomly dropped on non-recurrent connections.")
 tf.app.flags.DEFINE_integer("batch_size", 100, "Batch size to use")
 tf.app.flags.DEFINE_integer("hidden_size", 200, "Size of the hidden states")
-tf.app.flags.DEFINE_integer("context_len", 600, "The maximum context length of your model")
-tf.app.flags.DEFINE_integer("question_len", 30, "The maximum question length of your model")
+tf.app.flags.DEFINE_integer("context_len", 600, "The maximum context length of your model") # preferred 400
+tf.app.flags.DEFINE_integer("question_len", 30, "The maximum question length of your model") # preferred 27
 tf.app.flags.DEFINE_integer("embedding_size", 100, "Size of the pretrained word vectors. This needs to be one of the available GloVe dimensions: 50/100/200/300")
 
 # For CNN
 tf.app.flags.DEFINE_bool("enable_cnn", False, "Flag to control CNN.")
-tf.app.flags.DEFINE_integer("char_embedding_size", 20, "Size of the character embeddings.")
-tf.app.flags.DEFINE_integer("word_len", 18, "the maximum word length.") # this only filters 0.05% of the tokens
+tf.app.flags.DEFINE_integer("char_embedding_size", 20, "Size of the character embeddings.") # suggested by handout.
+tf.app.flags.DEFINE_integer("word_len", 18, "the maximum word length.") # 18 filters 0.05% of the tokens, 17:0.079%, 16:0.12%, 15:0.19%
 tf.app.flags.DEFINE_integer("cnn_filters", 100, "the number of filters for char CNN.")
 tf.app.flags.DEFINE_integer("cnn_kernel_size", 5, "the kernel size for char CNN.")
 
@@ -131,7 +131,7 @@ def main(unused_argv):
     # Load embedding matrix and vocab mappings
     emb_matrix, word2id, id2word = get_glove(FLAGS.glove_path, FLAGS.embedding_size)
     
-    # Build character level embedding matrix and vocab mappings
+    # Build character level vocab mappings
     char2id, id2char = get_char_mapping()
 
     # Get filepaths to train/dev datafiles for tokenized queries, contexts and answers
