@@ -32,7 +32,8 @@ import tensorflow as tf
 # from bidaf_model import QAModel
 # from bidaf_self_model import QAModel
 # from coattn_model import QAModel
-from bi_co_attn_model import QAModel
+# from bi_co_attn_model import QAModel
+from coco_attn_model import QAModel
 from vocab import get_glove
 from official_eval_helper import get_json_data, generate_answers
 
