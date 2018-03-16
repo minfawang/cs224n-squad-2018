@@ -116,7 +116,7 @@ def token_to_padded_character_ids(tokens, char2id, word_len):
       maxlen = min(len(token), word_len)
       padlen = word_len - maxlen
       ch_ids = [char2id.get(token[i], CHAR_UNK_ID) for i in range(0, maxlen)] + [CHAR_PAD_ID]*padlen
-      char_list.append(char2id)
+      char_list.append(ch_ids)
       
     return char_list
   
