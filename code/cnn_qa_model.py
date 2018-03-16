@@ -453,7 +453,7 @@ class QAModel(object):
                                          question_len=self.FLAGS.question_len,
                                          word_len=self.FLAGS.word_len,
                                          discard_long=False):
-
+            
             pred_start_pos, pred_end_pos = self.get_start_end_pos(session, batch)
 
             # Convert the start and end positions to lists length batch_size
