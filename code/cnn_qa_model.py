@@ -139,24 +139,24 @@ class QAModel(object):
 
             # TODO(binbinx): add a dropout layer.
             context_char_embs = embedding_ops.embedding_lookup(char_emb_matrix, self.context_char_ids) # shape (batch_size, context_len, word_len, embedding_size)
-            context_conv = tf.layers.conv1d(context_char_embs, 
+            context_conv = tf.layers.conv1d(tf.reshape(context_char_embs, [-1, self.FLAGS.word_len, self.FLAGS.char_embedding_size]), 
                                             self.FLAGS.cnn_filters, 
                                             self.FLAGS.cnn_kernel_size, 
                                             padding='valid', 
-                                            activation=tf.nn.relu) # shape (batch_size, context_len, word_len-kernel+1, filter)
-            self.context_char_embs = tf.reduce_max(context_conv, axis=2) # shape (batch_size, context_len, filter)
-#             self.context_char_embs = tf.reshape(context_char_cnn, 
-#                                                 [self.context_ids.shape[0], self.context_ids.shape[1], self.FLAGS.filter]) # shape (batch_size, context_len, filter)
+                                            activation=tf.nn.relu) # shape (batch_size*context_len, word_len-kernel+1, filter)
+            context_char_cnn = tf.reduce_max(context_conv, axis=1) # shape (batch_size*context_len, filter)
+            self.context_char_embs = tf.reshape(context_char_cnn, 
+                                                [-1, self.FLAGS.context_len, self.FLAGS.filter]) # shape (batch_size, context_len, filter)
             
             qn_char_embs = embedding_ops.embedding_lookup(char_emb_matrix, self.qn_char_ids) # shape (batch_size, question_len, word_len, embedding_size)
-            qn_conv = tf.layers.conv1d(qn_char_embs, 
+            qn_conv = tf.layers.conv1d(tf.reshape(qn_char_embs, [-1, self.FLAGS.word_len, self.FLAGS.char_embedding_size]), 
                                        self.FLAGS.cnn_filters, 
                                        self.FLAGS.cnn_kernel_size, 
                                        padding='valid', 
-                                       activation=tf.nn.relu) # shape (batch_size, question_len, word_len-kernel+1, filter)
-            self.qn_char_embs = tf.reduce_max(context_conv, axis=2) # shape (batch_size, question_len, filter)
-#             self.qn_char_embs = tf.reshape(qn_char_cnn, 
-#                                            [self.qn_ids.shape[0], self.qn_ids.shape[1], self.FLAGS.filter]) # shape (batch_size, question_len, filter)
+                                       activation=tf.nn.relu) # shape (batch_size*question_len, word_len-kernel+1, filter)
+            qn_char_cnn = tf.reduce_max(context_conv, axis=1) # shape (batch_size*question_len, filter)
+            self.qn_char_embs = tf.reshape(qn_char_cnn,
+                                           [-1, self.FLAGS.question_len, self.FLAGS.filter]) # shape (batch_size, question_len, filter)
     
     def build_graph(self):
         """Builds the main part of the graph for the model, starting from the input embeddings to the final distributions for the answer span.
