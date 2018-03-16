@@ -54,7 +54,7 @@ tf.app.flags.DEFINE_integer("question_len", 27, "The maximum question length of 
 tf.app.flags.DEFINE_integer("embedding_size", 100, "Size of the pretrained word vectors. This needs to be one of the available GloVe dimensions: 50/100/200/300")
 
 # For CNN
-tf.app.flags.DEFINE_integer("enable_cnn", false, "Flag to control CNN.")
+tf.app.flags.DEFINE_bool("enable_cnn", false, "Flag to control CNN.")
 tf.app.flags.DEFINE_integer("char_embedding_size", 20, "Size of the character embeddings.")
 tf.app.flags.DEFINE_integer("word_len", 18, "the maximum word length.") # this only filters 0.05% of the tokens
 tf.app.flags.DEFINE_integer("cnn_filters", 100, "the number of filters for char CNN.")
@@ -132,7 +132,7 @@ def main(unused_argv):
     emb_matrix, word2id, id2word = get_glove(FLAGS.glove_path, FLAGS.embedding_size)
     
     # Build character level embedding matrix and vocab mappings
-    char2id, id2char = get_char_mapping(FLAGS.char_embs_path)
+    char2id, id2char = get_char_mapping()
 
     # Get filepaths to train/dev datafiles for tokenized queries, contexts and answers
     train_context_path = os.path.join(FLAGS.data_dir, "train.context")
