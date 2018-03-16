@@ -30,7 +30,9 @@ from vocab import PAD_ID, UNK_ID, CHAR_PAD_ID, CHAR_UNK_ID
 class Batch(object):
     """A class to hold the information needed for a training batch"""
 
-    def __init__(self, context_ids, context_mask, context_tokens, qn_ids, qn_mask, qn_tokens, ans_span, ans_tokens, uuids=None):
+    def __init__(self, context_ids, context_mask, context_tokens, qn_ids, 
+                 qn_mask, qn_tokens, ans_span, ans_tokens, 
+                 context_char_ids, qn_char_ids, uuids=None):
         """
         Inputs:
           {context/qn}_ids: Numpy arrays.
@@ -56,6 +58,9 @@ class Batch(object):
         self.uuids = uuids
 
         self.batch_size = len(self.context_tokens)
+        
+        self.context_char_ids = context_char_ids
+        self.qn_char_ids = qn_char_ids
 
 
 def split_by_whitespace(sentence):
