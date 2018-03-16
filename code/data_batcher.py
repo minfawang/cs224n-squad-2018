@@ -98,11 +98,6 @@ def padded(token_batch, char_batch, word_len, batch_pad=0):
     maxlen = max(map(lambda x: len(x), token_batch)) if batch_pad == 0 else batch_pad
     padded_token_batch = map(lambda token_list: token_list + [PAD_ID] * (maxlen - len(token_list)), token_batch)
     padded_char_batch = map(lambda token_list: token_list + [[CHAR_PAD_ID]*word_len] * (maxlen - len(token_list)), char_batch)
-    
-    assert np.array(padded_token_batch).shape[1] == batch_pad
-    assert np.array(padded_char_batch).shape[1] == batch_pad
-    assert np.array(padded_char_batch).shape[2] == word_len
-    
     return padded_token_batch, padded_char_batch
   
 
@@ -239,7 +234,6 @@ def get_batch_generator(word2id, char2id, context_path, qn_path, ans_path,
         # Pad context_ids and qn_ids
         ## Also pad context_ids and qn_context_ids
         qn_ids, qn_char_ids = padded(qn_ids, qn_char_ids, word_len, question_len) # pad questions to length question_len
-        
         context_ids, context_char_ids = padded(context_ids, context_char_ids, word_len, context_len) # pad contexts to length context_len
         
         # Make qn_ids into a np array and create qn_mask

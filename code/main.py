@@ -25,7 +25,7 @@ import logging
 
 import tensorflow as tf
 
-from qa_model import QAModel
+from cnn_qa_model import QAModel
 from vocab import get_glove, get_char_mapping
 from official_eval_helper import get_json_data, generate_answers
 

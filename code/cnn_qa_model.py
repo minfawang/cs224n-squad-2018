@@ -124,6 +124,7 @@ class QAModel(object):
             self.context_embs = embedding_ops.embedding_lookup(embedding_matrix, self.context_ids) # shape (batch_size, context_len, embedding_size)
             self.qn_embs = embedding_ops.embedding_lookup(embedding_matrix, self.qn_ids) # shape (batch_size, question_len, embedding_size)
 
+
     def add_char_embedding_layer(self):
         """
         Adds character embedding layer to the graph. This consists of embedding
@@ -160,7 +161,8 @@ class QAModel(object):
             qn_char_cnn = tf.reduce_max(qn_conv, axis=1) # shape (batch_size*question_len, filter)
             self.qn_char_embs = tf.reshape(qn_char_cnn,
                                            [-1, self.FLAGS.question_len, self.FLAGS.cnn_filters]) # shape (batch_size, question_len, filter)
-    
+
+
     def build_graph(self):
         """Builds the main part of the graph for the model, starting from the input embeddings to the final distributions for the answer span.
 
