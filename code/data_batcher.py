@@ -98,7 +98,7 @@ def padded(token_batch, char_batch, word_len, batch_pad=0):
     maxlen = max(map(lambda x: len(x), token_batch)) if batch_pad == 0 else batch_pad
     padded_token_batch = map(lambda token_list: token_list + [PAD_ID] * (maxlen - len(token_list)), token_batch)
     padded_char_batch = map(lambda token_list: token_list + [[CHAR_PAD_ID]*word_len] * (maxlen - len(token_list)), char_batch)
-    print padded_char_batch
+    assert len(padded_char_batch) == len(padded_token_batch)
     return padded_token_batch, padded_char_batch
   
 
@@ -118,8 +118,6 @@ def token_to_padded_character_ids(tokens, char2id, word_len):
       padlen = word_len - maxlen
       ch_ids = [char2id.get(token[i], CHAR_UNK_ID) for i in range(0, maxlen)] + [CHAR_PAD_ID]*padlen
       char_list.append(ch_ids)
-      print token
-      print char_ids
     return char_list
   
   
