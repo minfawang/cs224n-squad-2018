@@ -313,11 +313,40 @@ class QAModel(object):
         # Get start_dist and end_dist, both shape (batch_size, context_len)
         start_dist, end_dist = self.get_prob_dists(session, batch)
 
-        # Take argmax to get start_pos and end_post, both shape (batch_size)
-        start_pos = np.argmax(start_dist, axis=1)
-        end_pos = np.argmax(end_dist, axis=1)
+        assert start_dist.shape == (batch.batch_size, self.FLAGS.context_len)
+        assert end_dist.shape == (batch.batch_size, self.FLAGS.context_len)
+        top_n = self.FLAGS.beam_search_size
 
-        return start_pos, end_pos
+        def nlargest(start_dist_example):
+            return heapq.nlargest(top_n, enumerate(start_dist_example), lambda (i, prob): (prob, i))
+
+        def beam_search(top_start_idx_probs, top_end_idx_probs):
+            """Beam search on final start and end indices.
+            Find the (start_i, end_i) pair fulfills:
+              start_i + 15 >= end_i >= start_i and
+              maximize(start_prob * end_prob).
+            If no such pair is found in the beam search range, then
+            i = i_start = i_end = argmax_i(start_prob, end_prob)
+
+            Reference:
+            https://nlp.stanford.edu/pubs/chen2017reading.pdf
+            """
+            max_prob, max_pair = 0.0, None
+            for start_i, start_prob in top_start_idx_probs:
+                for end_i, end_prob in top_end_idx_probs:
+                    # Skip invalid range.
+                    if (end_i < start_i) or (end_i >= start_i + 15):
+                        continue
+                    cur_prob = start_prob * end_prob
+                    cur_pair = (start_i, end_i)
+                    if cur_prob > max_prob:
+                        max_prob, max_pair = cur_prob, cur_pair
+
+            if max_pair is None:
+                i = start_i if start_prob > end_prob else end_i
+                return (i, i)
+
+            return max_pair
 
 
     def get_dev_loss(self, session, dev_context_path, dev_qn_path, dev_ans_path):
