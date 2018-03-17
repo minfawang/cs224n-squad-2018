@@ -24,6 +24,7 @@ import sys
 import logging
 
 import tensorflow as tf
+import importlib
 
 # from qa_model import QAModel
 # from edsa_model import QAModel
@@ -33,10 +34,11 @@ import tensorflow as tf
 # from bidaf_self_model import QAModel
 # from coattn_model import QAModel
 # from bi_co_attn_model import QAModel
-from coco_attn_model import QAModel
+# from coco_attn_model import QAModel
+# from bio_model import QAModel
+# from bico_model import QAModel
 from vocab import get_glove
 from official_eval_helper import get_json_data, generate_answers
-
 
 logging.basicConfig(level=logging.INFO)
 
@@ -50,6 +52,7 @@ tf.app.flags.DEFINE_integer("gpu", 0, "Which GPU to use, if you have multiple.")
 tf.app.flags.DEFINE_string("mode", "train", "Available modes: train / show_examples / official_eval")
 tf.app.flags.DEFINE_string("experiment_name", "", "Unique name for your experiment. This will create a directory by this name in the experiments/ directory, which will hold all data related to this experiment")
 tf.app.flags.DEFINE_integer("num_epochs", 0, "Number of epochs to train. 0 means train indefinitely")
+tf.app.flags.DEFINE_string("model", "qa", "Name of the model to build the graph.")
 
 # Hyperparameters
 tf.app.flags.DEFINE_float("learning_rate", 0.001, "Learning rate.")
@@ -77,7 +80,6 @@ tf.app.flags.DEFINE_string("json_out_path", "predictions.json", "Output path for
 
 # Heuristics.
 tf.app.flags.DEFINE_integer("beam_search_size", 5, "Size for the final beam search.")
-
 
 FLAGS = tf.app.flags.FLAGS
 os.environ["CUDA_VISIBLE_DEVICES"] = str(FLAGS.gpu)
@@ -121,10 +123,18 @@ def main(unused_argv):
     # Print out Tensorflow version
     print "This code was developed and tested on TensorFlow 1.4.1. Your TensorFlow version: %s" % tf.__version__
 
+    # Import model and validate model
+    model_name = FLAGS.model + '_model'
+    print('Model imported from: {}'.format(model_name))
+    QAModel = importlib.import_module(model_name).QAModel
+
     # Define train_dir
+    print('learning rate: {}'.format(FLAGS.learning_rate))
+    print('batch size: {}'.format(FLAGS.batch_size))
     if not FLAGS.experiment_name and not FLAGS.train_dir and FLAGS.mode != "official_eval":
         raise Exception("You need to specify either --experiment_name or --train_dir")
     FLAGS.train_dir = FLAGS.train_dir or os.path.join(EXPERIMENTS_DIR, FLAGS.experiment_name)
+    print('train dir: {}'.format(FLAGS.train_dir))
 
     # Initialize bestmodel directory
     bestmodel_dir = os.path.join(FLAGS.train_dir, "best_checkpoint")
