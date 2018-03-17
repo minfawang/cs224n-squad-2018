@@ -13,12 +13,12 @@
 # limitations under the License.
 
 """This file defines the top-level model
-Number of Params: 1025002
+Number of Params: 824002
 $ source activate squad
-$ python code/main.py --mode=train --experiment_name="bio_lr=0.001_batch=100_context=400_qn=27_hidden=100" --hidden_size=100 --context_len=400 --question_len=27 --model="bio"
+$ python code/main.py --mode=train --experiment_name="bin_lr=0.001_batch=100_context=400_qn=27_hidden=100" --hidden_size=100 --context_len=400 --question_len=27 --model="bin"
 
 Batch Time:
-MacBook 2012: 12s
+GPU M60: 3.4s
 """
 
 from __future__ import absolute_import
