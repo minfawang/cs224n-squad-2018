@@ -13,12 +13,12 @@
 # limitations under the License.
 
 """This file defines the top-level model
-Number of Params: 1185602
+Number of Params: 1325402
 $ source activate squad
-$ python code/main.py --mode=train --experiment_name="bico_lr=0.001_batch=100_context=400_qn=27_hidden=100" --hidden_size=100 --context_len=400 --question_len=27 --model="bico"
+$ python code/main.py --mode=train --experiment_name="sebinco_lr=0.001_batch=100_context=400_qn=27_hidden=100" --hidden_size=100 --context_len=400 --question_len=27 --model="sebinco"
 
 Batch Time:
-MacBook 2012: 12.5s
+MacBook 2012: 18s
 """
 
 from __future__ import absolute_import
@@ -144,17 +144,34 @@ class QAModel(object):
         bidaf_attn_layer = BidafAttn(self.keep_prob, self.FLAGS.context_len, self.FLAGS.hidden_size * 2)
         bidaf_out = bidaf_attn_layer.build_graph(question_hiddens, self.qn_mask, context_hiddens, self.context_mask)  # (batch_size, context_len, hidden_size*8)
 
+        # Condense the information: hidden_size*8 --> hidden_size*2
+        bidaf_out = tf.contrib.layers.fully_connected(
+            bidaf_out,
+            num_outputs=self.FLAGS.hidden_size*2,
+            normalizer_fn=tf.contrib.layers.batch_norm
+        )  # (batch_size, context_len, hidden_size*2)
+
         # Co-attention
         co_attn_layer = CoAttnLite(self.keep_prob, self.FLAGS.hidden_size, self.FLAGS.hidden_size * 2)
         co_out = co_attn_layer.build_graph(question_hiddens, self.qn_mask, context_hiddens, self.context_mask)  # (batch_size, context_len, hidden_size*2)
 
-        bico_out = tf.concat([bidaf_out, co_out], 2)  # (batch_size, context_len, hidden_size*10)
+        bico_out = tf.concat([bidaf_out, co_out], 2)  # (batch_size, context_len, hidden_size*4)
 
         # Capture interactions among context words conditioned on the query.
-        gru_layer1 = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob)  # params: (hidden_size*10 + hidden_size) * hidden_size * 2 * 3
-        model_reps = gru_layer1.build_graph(bico_out, self.context_mask, variable_scope='ModelGRU1')  # (batch_size, context_len, hidden_size*2)
+        gru_layer1 = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob)  # params: (hidden_size*4 + hidden_size) * hidden_size * 2 * 3
+        model_reps1 = gru_layer1.build_graph(bico_out, self.context_mask, variable_scope='ModelGRU1')  # (batch_size, context_len, hidden_size*2)
+
         gru_layer2 = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob)  # params: (2*hidden_size + hidden_size) * hidden_size * 2 * 3
-        model_reps = gru_layer2.build_graph(model_reps, self.context_mask, variable_scope='ModelGRU2')  # (batch_size, context_len, hidden_size*2)
+        model_reps2 = gru_layer2.build_graph(model_reps1, self.context_mask, variable_scope='ModelGRU2')  # (batch_size, context_len, hidden_size*2)
+
+        # Self Attention & GRU layer parallel to GRU layer2.
+        with tf.variable_scope('SelfAttnGRU'):
+            self_attn_layer = MulAttn(self.keep_prob, self.FLAGS.hidden_size * 2, self.FLAGS.hidden_size * 2)
+            se_attn = self_attn_layer.build_graph(model_reps1, self.context_mask, model_reps1, self.context_mask)  # (batch_size, context_len, hidden_size*2)
+            se_gru_layer = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob)  # params: (2*hidden_size + hidden_size) * hidden_size * 2 * 3
+            se_out = se_gru_layer.build_graph(se_attn, self.context_mask, variable_scope='SelfGRU')  # (batch_size, context_len, hidden_size*2)
+
+        model_reps = tf.concat([model_reps2, se_out], 2)  # (batch_size, context_len, hidden_size*4)
 
         # Use softmax layer to compute probability distribution for start location
         # Note this produces self.logits_start and self.probdist_start, both of which have shape (batch_size, context_len)
