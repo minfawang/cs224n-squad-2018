@@ -13,7 +13,7 @@
 # limitations under the License.
 
 """This file defines the top-level model
-Number of Params: 1065202
+Number of Params: 984202
 $ source activate squad
 $ python code/main.py --mode=train --experiment_name="binco_lr=0.001_batch=100_context=400_qn=27_hidden=100" --hidden_size=100 --context_len=400 --question_len=27 --model="binco"
 
@@ -355,6 +355,15 @@ class QAModel(object):
 
             return max_pair
 
+        start_idx_prob_pairs = map(nlargest, start_dist)
+        end_idx_prob_pairs = map(nlargest, end_dist)
+        start_end_pos_pairs = [
+            beam_search(start_prob_idxs, end_prob_idxs)
+            for start_prob_idxs, end_prob_idxs
+            in zip(start_idx_prob_pairs, end_idx_prob_pairs)]
+        start_pos, end_pos = np.array(zip(*start_end_pos_pairs))
+
+        return start_pos, end_pos
 
     def get_dev_loss(self, session, dev_context_path, dev_qn_path, dev_ans_path):
         """
