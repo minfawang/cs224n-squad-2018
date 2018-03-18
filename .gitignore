@@ -2,6 +2,8 @@ data/
 experiments/
 mini_data/
 mini_experiments/
+Untitled.ipynb
+predictions.json
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
