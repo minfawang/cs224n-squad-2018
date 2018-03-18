@@ -21,6 +21,7 @@ import time
 import logging
 import os
 import sys
+import heapq
 
 import numpy as np
 import tensorflow as tf
@@ -30,7 +31,7 @@ from tensorflow.python.ops import embedding_ops
 from evaluate import exact_match_score, f1_score
 from data_batcher import get_batch_generator
 from pretty_print import print_example
-from modules import RNNEncoder, SimpleSoftmaxLayer, BasicAttn
+from modules import RNNEncoder, SimpleSoftmaxLayer, BasicAttn, MulAttn, BidafAttn, CoAttnLite
 
 logging.basicConfig(level=logging.INFO)
 
@@ -193,30 +194,58 @@ class QAModel(object):
         context_hiddens = encoder.build_graph(context_embs, self.context_mask) # (batch_size, context_len, hidden_size*2)
         question_hiddens = encoder.build_graph(qn_embs, self.qn_mask) # (batch_size, question_len, hidden_size*2)
 
-        # Use context hidden states to attend to question hidden states
-        attn_layer = BasicAttn(self.keep_prob, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size*2)
-        _, attn_output = attn_layer.build_graph(question_hiddens, self.qn_mask, context_hiddens) # attn_output is shape (batch_size, context_len, hidden_size*2)
+        # Encode query-aware representations of the context words
+        bidaf_attn_layer = BidafAttn(self.keep_prob, self.FLAGS.context_len, self.FLAGS.hidden_size * 2)
+        bidaf_out = bidaf_attn_layer.build_graph(question_hiddens, self.qn_mask, context_hiddens, self.context_mask)  # (batch_size, context_len, hidden_size*8)
 
-        # Concat attn_output to context_hiddens to get blended_reps
-        blended_reps = tf.concat([context_hiddens, attn_output], axis=2) # (batch_size, context_len, hidden_size*4)
+        # Condense the information: hidden_size*8 --> hidden_size*2
+        bidaf_out = tf.contrib.layers.fully_connected(
+            bidaf_out,
+            num_outputs=self.FLAGS.hidden_size*2,
+            normalizer_fn=tf.contrib.layers.batch_norm
+        )  # (batch_size, context_len, hidden_size*2)
 
-        # Apply fully connected layer to each blended representation
-        # Note, blended_reps_final corresponds to b' in the handout
-        # Note, tf.contrib.layers.fully_connected applies a ReLU non-linarity here by default
-        blended_reps_final = tf.contrib.layers.fully_connected(blended_reps, num_outputs=self.FLAGS.hidden_size) # blended_reps_final is shape (batch_size, context_len, hidden_size)
+        # Co-attention
+        co_attn_layer = CoAttnLite(self.keep_prob, self.FLAGS.hidden_size, self.FLAGS.hidden_size * 2)
+        co_out = co_attn_layer.build_graph(question_hiddens, self.qn_mask, context_hiddens, self.context_mask)  # (batch_size, context_len, hidden_size*2)
+
+        bico_out = tf.concat([bidaf_out, co_out], 2)  # (batch_size, context_len, hidden_size*4)
+
+        # Capture interactions among context words conditioned on the query.
+        gru_layer1 = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob)  # params: (hidden_size*4 + hidden_size) * hidden_size * 2 * 3
+        model_reps1 = gru_layer1.build_graph(bico_out, self.context_mask, variable_scope='ModelGRU1')  # (batch_size, context_len, hidden_size*2)
+
+        gru_layer2 = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob)  # params: (2*hidden_size + hidden_size) * hidden_size * 2 * 3
+        model_reps2 = gru_layer2.build_graph(model_reps1, self.context_mask, variable_scope='ModelGRU2')  # (batch_size, context_len, hidden_size*2)
+
+        # Self Attention & GRU layer parallel to GRU layer2.
+        with tf.variable_scope('SelfAttnGRU'):
+            self_attn_layer = MulAttn(self.keep_prob, self.FLAGS.hidden_size * 2, self.FLAGS.hidden_size * 2)
+            se_attn = self_attn_layer.build_graph(model_reps1, self.context_mask, model_reps1, self.context_mask)  # (batch_size, context_len, hidden_size*2)
+            se_gru_layer = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob)  # params: (2*hidden_size + hidden_size) * hidden_size * 2 * 3
+            se_out = se_gru_layer.build_graph(se_attn, self.context_mask, variable_scope='SelfGRU')  # (batch_size, context_len, hidden_size*2)
+
+        model_reps = tf.concat([model_reps2, se_out], 2)  # (batch_size, context_len, hidden_size*4)
 
         # Use softmax layer to compute probability distribution for start location
         # Note this produces self.logits_start and self.probdist_start, both of which have shape (batch_size, context_len)
         with vs.variable_scope("StartDist"):
+            start_reps = tf.concat([bico_out, model_reps], 2)  # (batch_size, context_len, hidden_size*10)
             softmax_layer_start = SimpleSoftmaxLayer()
-            self.logits_start, self.probdist_start = softmax_layer_start.build_graph(blended_reps_final, self.context_mask)
+            self.logits_start, self.probdist_start = softmax_layer_start.build_graph(start_reps, self.context_mask)
 
         # Use softmax layer to compute probability distribution for end location
         # Note this produces self.logits_end and self.probdist_end, both of which have shape (batch_size, context_len)
         with vs.variable_scope("EndDist"):
-            softmax_layer_end = SimpleSoftmaxLayer()
-            self.logits_end, self.probdist_end = softmax_layer_end.build_graph(blended_reps_final, self.context_mask)
+            gru_end_layer = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob)
+            model_end_reps = gru_end_layer.build_graph(model_reps, self.context_mask, variable_scope='EndGRU')  # (batch_size, context_len, hidden_size*2)
+            end_reps = tf.concat([bico_out, model_end_reps], 2)  # (batch_size, context_len, hidden_size*10)
 
+            softmax_layer_end = SimpleSoftmaxLayer()
+            self.logits_end, self.probdist_end = softmax_layer_end.build_graph(end_reps, self.context_mask)
+
+        for variable in tf.trainable_variables():
+            tf.summary.histogram(variable.name.replace(':', '/'), variable)
 
     def add_loss(self):
         """
@@ -358,11 +387,9 @@ class QAModel(object):
     def get_start_end_pos(self, session, batch):
         """
         Run forward-pass only; get the most likely answer span.
-
         Inputs:
           session: TensorFlow session
           batch: Batch object
-
         Returns:
           start_pos, end_pos: both numpy arrays shape (batch_size).
             The most likely start and end positions for each example in the batch.
@@ -370,9 +397,47 @@ class QAModel(object):
         # Get start_dist and end_dist, both shape (batch_size, context_len)
         start_dist, end_dist = self.get_prob_dists(session, batch)
 
-        # Take argmax to get start_pos and end_post, both shape (batch_size)
-        start_pos = np.argmax(start_dist, axis=1)
-        end_pos = np.argmax(end_dist, axis=1)
+        assert start_dist.shape == (batch.batch_size, self.FLAGS.context_len)
+        assert end_dist.shape == (batch.batch_size, self.FLAGS.context_len)
+        top_n = self.FLAGS.beam_search_size
+
+        def nlargest(start_dist_example):
+            return heapq.nlargest(top_n, enumerate(start_dist_example), lambda (i, prob): (prob, i))
+
+        def beam_search(top_start_idx_probs, top_end_idx_probs):
+            """Beam search on final start and end indices.
+            Find the (start_i, end_i) pair fulfills:
+              start_i + 15 >= end_i >= start_i and
+              maximize(start_prob * end_prob).
+            If no such pair is found in the beam search range, then
+            i = i_start = i_end = argmax_i(start_prob, end_prob)
+            Reference:
+            https://nlp.stanford.edu/pubs/chen2017reading.pdf
+            """
+            max_prob, max_pair = 0.0, None
+            for start_i, start_prob in top_start_idx_probs:
+                for end_i, end_prob in top_end_idx_probs:
+                    # Skip invalid range.
+                    if (end_i < start_i) or (end_i >= start_i + 15):
+                        continue
+                    cur_prob = start_prob * end_prob
+                    cur_pair = (start_i, end_i)
+                    if cur_prob > max_prob:
+                        max_prob, max_pair = cur_prob, cur_pair
+
+            if max_pair is None:
+                i = start_i if start_prob > end_prob else end_i
+                return (i, i)
+
+            return max_pair
+
+        start_idx_prob_pairs = map(nlargest, start_dist)
+        end_idx_prob_pairs = map(nlargest, end_dist)
+        start_end_pos_pairs = [
+            beam_search(start_prob_idxs, end_prob_idxs)
+            for start_prob_idxs, end_prob_idxs
+            in zip(start_idx_prob_pairs, end_idx_prob_pairs)]
+        start_pos, end_pos = np.array(zip(*start_end_pos_pairs))
 
         return start_pos, end_pos
 
