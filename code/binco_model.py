@@ -15,7 +15,7 @@
 """This file defines the top-level model
 Number of Params: 1065202
 $ source activate squad
-$ python code/main.py --mode=train --experiment_name="bico_lr=0.001_batch=100_context=400_qn=27_hidden=100" --hidden_size=100 --context_len=400 --question_len=27 --model="bico"
+$ python code/main.py --mode=train --experiment_name="binco_lr=0.001_batch=100_context=400_qn=27_hidden=100" --hidden_size=100 --context_len=400 --question_len=27 --model="binco"
 
 Batch Time:
 MacBook 2012: 12.5s
@@ -144,14 +144,21 @@ class QAModel(object):
         bidaf_attn_layer = BidafAttn(self.keep_prob, self.FLAGS.context_len, self.FLAGS.hidden_size * 2)
         bidaf_out = bidaf_attn_layer.build_graph(question_hiddens, self.qn_mask, context_hiddens, self.context_mask)  # (batch_size, context_len, hidden_size*8)
 
+        # Condense the information: hidden_size*8 --> hidden_size*2
+        bidaf_out = tf.contrib.layers.fully_connected(
+            bidaf_out,
+            num_outputs=self.FLAGS.hidden_size*2,
+            normalizer_fn=tf.contrib.layers.batch_norm
+        )  # (batch_size, context_len, hidden_size*2)
+
         # Co-attention
         co_attn_layer = CoAttnLite(self.keep_prob, self.FLAGS.hidden_size, self.FLAGS.hidden_size * 2)
         co_out = co_attn_layer.build_graph(question_hiddens, self.qn_mask, context_hiddens, self.context_mask)  # (batch_size, context_len, hidden_size*2)
 
-        bico_out = tf.concat([bidaf_out, co_out], 2)  # (batch_size, context_len, hidden_size*10)
+        bico_out = tf.concat([bidaf_out, co_out], 2)  # (batch_size, context_len, hidden_size*4)
 
         # Capture interactions among context words conditioned on the query.
-        gru_layer1 = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob)  # params: (hidden_size*10 + hidden_size) * hidden_size * 2 * 3
+        gru_layer1 = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob)  # params: (hidden_size*4 + hidden_size) * hidden_size * 2 * 3
         model_reps = gru_layer1.build_graph(bico_out, self.context_mask, variable_scope='ModelGRU1')  # (batch_size, context_len, hidden_size*2)
         gru_layer2 = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob)  # params: (2*hidden_size + hidden_size) * hidden_size * 2 * 3
         model_reps = gru_layer2.build_graph(model_reps, self.context_mask, variable_scope='ModelGRU2')  # (batch_size, context_len, hidden_size*2)
