@@ -28,6 +28,7 @@ import time
 import logging
 import os
 import sys
+import heapq
 
 import numpy as np
 import tensorflow as tf
