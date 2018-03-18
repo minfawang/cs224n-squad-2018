@@ -166,7 +166,7 @@ class QAModel(object):
         # Use softmax layer to compute probability distribution for start location
         # Note this produces self.logits_start and self.probdist_start, both of which have shape (batch_size, context_len)
         with vs.variable_scope("StartDist"):
-            start_reps = tf.concat([bidaf_out, model_reps], 2)  # (batch_size, context_len, hidden_size*10)
+            start_reps = tf.concat([bico_out, model_reps], 2)  # (batch_size, context_len, hidden_size*10)
             softmax_layer_start = SimpleSoftmaxLayer()
             self.logits_start, self.probdist_start = softmax_layer_start.build_graph(start_reps, self.context_mask)
 
@@ -175,7 +175,7 @@ class QAModel(object):
         with vs.variable_scope("EndDist"):
             gru_end_layer = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob)
             model_end_reps = gru_end_layer.build_graph(model_reps, self.context_mask, variable_scope='EndGRU')  # (batch_size, context_len, hidden_size*2)
-            end_reps = tf.concat([bidaf_out, model_end_reps], 2)  # (batch_size, context_len, hidden_size*10)
+            end_reps = tf.concat([bico_out, model_end_reps], 2)  # (batch_size, context_len, hidden_size*10)
 
             softmax_layer_end = SimpleSoftmaxLayer()
             self.logits_end, self.probdist_end = softmax_layer_end.build_graph(end_reps, self.context_mask)
