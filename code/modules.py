@@ -147,11 +147,13 @@ class CoAttnLite(object):
             L = tf.matmul(keys_h, vals_h)  # (batch_size, num_keys, num_values)
 
             # C2Q: key to value.
-            a_prob = tf.nn.softmax(L, 2)  # (batch_size, num_keys, num_values)
+            a_prob_mask = tf.transpose(values_mask_3d, perm=[0, 2, 1])  # (batch_size, 1, num_values)
+            _, a_prob = masked_softmax(L, a_prob_mask, 2)  # (batch_size, num_keys, num_values)
             a = tf.matmul(a_prob, tf.transpose(vals_h, [0, 2, 1]))  # (batch_size, num_keys, value_vec_size)
 
             # Q2C: value to key.
-            b_prob = tf.nn.softmax(L, 1)  # (batch_size, num_keys, num_values)
+            b_prob_mask = keys_mask_3d  # (batch_size, num_keys, 1)
+            _, b_prob = masked_softmax(L, b_prob_mask, 1)
             b = tf.matmul(tf.transpose(b_prob, [0, 2, 1]), keys_h)  # (batch_size, num_values, value_vec_size)
 
             # Use C2Q a_prob to take weighted sum of Q2C attention.
@@ -175,12 +177,12 @@ class CoAttn(object):
         Keys are like context. Values are like question.
         """
         with tf.variable_scope('CoAttn'):
+            batch_size = tf.shape(values)[0]
             keys_mask_3d = tf.cast(tf.expand_dims(keys_mask, 2), tf.float32)  # (batch_size, num_keys, 1)
             masked_keys = tf.multiply(keys, keys_mask_3d, name='masked_keys')  # (batch_size, num_keys, value_vec_size)
             values_mask_3d = tf.cast(tf.expand_dims(values_mask, 2), tf.float32)  # (batch_size, num_values, 1)
             masked_values = tf.multiply(values, values_mask_3d, name='masked_values')  # (batch_size, num_values, value_vec_size)
 
-            batch_size = tf.shape(values)[0]
             keys_h = tf.contrib.layers.fully_connected(masked_keys, self.value_vec_size)  # (batch_size, num_keys, value_vec_size)
             k0 = tf.get_variable('k0', shape=(1, 1, self.value_vec_size))
             keys_h = tf.concat([
@@ -197,11 +199,19 @@ class CoAttn(object):
             L = tf.matmul(keys_h, vals_h)  # (batch_size, num_keys + 1, num_values + 1)
 
             # C2Q: key to value.
-            a_prob = tf.nn.softmax(L, 2)  # (batch_size, num_keys + 1, num_values + 1)
+            a_prob_mask = tf.concat([
+                tf.ones([batch_size, 1, 1]),
+                tf.transpose(values_mask_3d, perm=[0, 2, 1]),
+            ], 2)  # (batch_size, 1, num_values + 1)
+            _, a_prob = masked_softmax(L, a_prob_mask, 2)  # (batch_size, num_keys + 1, num_values + 1)
             a = tf.matmul(a_prob, tf.transpose(vals_h, [0, 2, 1]))  # (batch_size, num_keys + 1, value_vec_size)
 
             # Q2C: value to key.
-            b_prob = tf.nn.softmax(L, 1)  # (batch_size, num_keys + 1, num_values + 1)
+            b_prob_mask = tf.concat([
+                tf.ones([batch_size, 1, 1]),
+                keys_mask_3d,
+            ], 1)  # (batch_size, num_keys + 1, 1)
+            _, b_prob = masked_softmax(L, b_prob_mask, 1)  # (batch_size, num_keys + 1, num_values + 1)
             b = tf.matmul(tf.transpose(b_prob, [0, 2, 1]), keys_h)  # (batch_size, num_values + 1, value_vec_size)
 
             # Use C2Q a_prob to take weighted sum of Q2C attention.
@@ -266,13 +276,16 @@ class BidafAttn(object):
 
             # c2q
             with tf.variable_scope('C2QAttn'):
-                c2q_attn_weights = tf.nn.softmax(similarity_matrix, 2, name='c2q_attn_weights')  # (batch_size, num_keys, num_values)
+                c2q_mask = tf.transpose(values_mask_3d, perm=[0, 2, 1]) # (batch_size, 1, num_values)
+                _, c2q_attn_weights = masked_softmax(similarity_matrix, c2q_mask, 2, name='c2q_attn_weights')  # (batch_size, num_keys, num_values)
                 c2q_attn = tf.matmul(c2q_attn_weights, masked_values) # (batch_size, num_keys, value_vec_size)
 
             # q2c
             with tf.variable_scope('Q2CAttn'):
-                q2c_attn_max = tf.reduce_max(similarity_matrix, axis=2, name='q2c_attn_max')  # (batch_size, num_keys)
-                q2c_attn_softmax = tf.expand_dims(tf.nn.softmax(q2c_attn_max), 1, name='q2c_attn_softmax')  # (batch_size, 1, num_keys)
+                exp_mask = (1 - c2q_mask) * (-1e30) # -large where there's padding, 0 elsewhere. (batch_size, 1, num_values)
+                q2c_attn_max = tf.reduce_max(similarity_matrix + exp_mask, axis=2, name='q2c_attn_max')  # (batch_size, num_keys)
+                _, q2c_attn_softmax = masked_softmax(q2c_attn_max, keys_mask, 1)  # (batch_size, num_keys)
+                q2c_attn_softmax = tf.expand_dims(q2c_attn_softmax, 1, name='q2c_attn_softmax')  # (batch_size, 1, num_keys)
                 q2c_attn = tf.matmul(q2c_attn_softmax, masked_keys, name='q2c_attn')  # (batch_size, 1, value_vec_size)
 
             blended_reps = tf.concat([
@@ -415,7 +428,10 @@ class MulAttn(object):
             attn_logits = tf.matmul(attn_logits, tf.transpose(masked_vals, perm=[0, 2, 1]))  # (batch_size, num_keys, num_values)
             # Logits divided by sqrt(dim) proposed from "Attention is all you need".
             # http://ruder.io/deep-learning-nlp-best-practices/index.html#attention
-            attn_dist = tf.nn.softmax(attn_logits / tf.sqrt(tf.cast(self.key_vec_size, tf.float32)), 2)
+            attn_logits /= tf.sqrt(tf.cast(self.key_vec_size, tf.float32))  # (batch_size, num_keys, num_values)
+
+            attn_mask = tf.transpose(values_mask_3d, perm=[0, 2, 1])  # (batch_size, 1, num_values)
+            _, attn_dist = masked_softmax(attn_logits, attn_mask, 2)
 
             output = tf.matmul(attn_dist, masked_vals) # (batch_size, num_keys, value_vec_size)
 
@@ -425,7 +441,7 @@ class MulAttn(object):
             return output
 
 
-def masked_softmax(logits, mask, dim):
+def masked_softmax(logits, mask, dim, name=None):
     """
     Takes masked softmax over given dimension of logits.
     Inputs:
@@ -444,5 +460,5 @@ def masked_softmax(logits, mask, dim):
     """
     exp_mask = (1 - tf.cast(mask, 'float')) * (-1e30) # -large where there's padding, 0 elsewhere
     masked_logits = tf.add(logits, exp_mask) # where there's padding, set logits to -large
-    prob_dist = tf.nn.softmax(masked_logits, dim)
+    prob_dist = tf.nn.softmax(masked_logits, dim, name=name)
     return masked_logits, prob_dist
