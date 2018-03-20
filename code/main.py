@@ -98,7 +98,7 @@ def initialize_model(session, model, train_dir, expect_exists):
       expect_exists: If True, throw an error if no checkpoint is found.
         If False, initialize fresh model if no checkpoint is found.
     """
-    print "Looking for model at %s..." % train_dir
+    print "Initializing model at %s" % train_dir
     ckpt = tf.train.get_checkpoint_state(train_dir)
     v2_path = ckpt.model_checkpoint_path + ".index" if ckpt else ""
     if ckpt and (tf.gfile.Exists(ckpt.model_checkpoint_path) or tf.gfile.Exists(v2_path)):
@@ -169,7 +169,7 @@ def resolve_ensemble_model_preds(ensemble_model_pred, ensemble_schema,
     num_batch = len(ensemble_model_pred[0])
     context_len = len(ensemble_model_pred[0][0]['start'][0])
 
-    for i in range(0, num_batch)
+    for i in range(0, num_batch):
         # For each batch
         batch_size = len(ensemble_model_pred[0][i]['start'])
         start_batch = np.zeros((batch_size, context_len))
@@ -219,7 +219,7 @@ def main(unused_argv):
     print "This code was developed and tested on TensorFlow 1.4.1. Your TensorFlow version: %s" % tf.__version__
 
     # Define train_dir
-    if (!FLAGS.enable_ensemble_model and not FLAGS.experiment_name and not FLAGS.train_dir and FLAGS.mode != "official_eval") or (FLAGS.enable_ensemble_model and not FLAGS.ensemble_model_names):
+    if (not FLAGS.enable_ensemble_model and not FLAGS.experiment_name and not FLAGS.train_dir and FLAGS.mode != "official_eval") or (FLAGS.enable_ensemble_model and not FLAGS.ensemble_model_names):
         raise Exception("You need to specify either --experiment_name or --train_dir, or ensemble_model_names if ensemble is enabled.")
     FLAGS.train_dir = FLAGS.train_dir or os.path.join(EXPERIMENTS_DIR, FLAGS.experiment_name)
 
@@ -244,9 +244,8 @@ def main(unused_argv):
     dev_ans_path = os.path.join(FLAGS.data_dir, "dev.span")
 
     
-    if !FLAGS.enable_ensemble_model:
+    if not FLAGS.enable_ensemble_model:
         # Initialize model only when ensemble model is disabled.
-        # TODO(change QAModel for ensemble method.)
         qa_model = QAModel(FLAGS, id2word, word2id, emb_matrix, char2id ,id2char)
 
     # Some GPU settings
@@ -300,7 +299,7 @@ def main(unused_argv):
 
         with tf.Session(config=config) as sess:
             
-            if enable_model_ensemble:
+            if FLAGS.enable_ensemble_model:
                 models = FLAGS.ensemble_model_names.split(';')
                 # A list to store the output of all predictions
                 # each entry is a map, storing the start and end dist for that batch.
@@ -310,7 +309,7 @@ def main(unused_argv):
                 # len(ensemble_model_pred[0]['end']) is batch_size
                 ensemble_model_pred = [] 
                 for model in models:
-                    print "Loading model: " % model   
+                    print "Loading model: %s" % model   
                     qa_model = QAModel(FLAGS, id2word, word2id, emb_matrix, char2id ,id2char)
                     
                     # Load model from ckpt_load_dir
