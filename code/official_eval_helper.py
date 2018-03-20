@@ -321,7 +321,7 @@ def generate_answers(session, model, word2id, char2id, qn_uuid_data,
     batch_num = 0
     detokenizer = MosesDetokenizer()
 
-    print "Generating answers %d answers..." % len(qn_uuid_data)
+    print "Generating %d answers..." % len(qn_uuid_data)
    
     # Container for ensemble models.
     model_pred = []

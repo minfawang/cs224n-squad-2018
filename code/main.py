@@ -168,7 +168,7 @@ def resolve_ensemble_model_preds(ensemble_model_pred, ensemble_schema=FLAGS.ense
     
     # validate flag value
     sum_weight = np.ones(len(ensemble_model_pred))
-    if ensemble_schema == 'sum'
+    if ensemble_schema == "sum" and len(sum_weights)>0:
         weights = np.array([float(w) for w in sum_weights.split(';')])
         assert len(ensemble_model_pred) == len(weights)
         sum_weight = weights
@@ -186,15 +186,15 @@ def resolve_ensemble_model_preds(ensemble_model_pred, ensemble_schema=FLAGS.ense
         end_batch = np.zeros((batch_size, context_len))
         
         
-        for model in ensemble_model_pred:
-          
+        for m in range(0, len(ensemble_model_pred)):
+            model = ensemble_model_pred[m]
             assert model[i]['start'].shape == start_batch.shape
             assert model[i]['end'].shape == end_batch.shape            
             
             # For each model
             if ensemble_schema == 'sum':
-                start_batch += sum_weight[i] * model[i]['start']
-                end_batch += sum_weight[i] * model[i]['end']
+                start_batch += sum_weight[m] * model[i]['start']
+                end_batch += sum_weight[m] * model[i]['end']
             elif ensemble_schema == 'max':
                 start_batch = np.maximum(start_batch, model[i]['start'])
                 end_batch = np.maximum(start_batch, model[i]['end'])
@@ -313,23 +313,23 @@ def main(unused_argv):
         # Read the JSON data from file
         qn_uuid_data, context_token_data, qn_token_data = get_json_data(FLAGS.json_in_path)
         
-        with tf.Session(config=config) as sess:
-            
-            if FLAGS.enable_ensemble_model:
-                models = FLAGS.ensemble_model_names.split(';')
+        if FLAGS.enable_ensemble_model:
+            models = FLAGS.ensemble_model_names.split(';')
 
-                # A list to store the output of all predictions
-                # each entry is a map, storing the start and end dist for that batch.
-                # len(ensemble_model_pred) is len(models)
-                # len(ensemble_model_pred[0]) is number of batches
-                # len(ensemble_model_pred[0]['start']) is batch_size
-                # len(ensemble_model_pred[0]['end']) is batch_size
-                ensemble_model_pred = [] 
-                for model in models:
-                    print "Loading model: %s" % model 
-                    # TODO(binbinx): change this to appropriate models
-                    qa_model = QAModel(FLAGS, id2word, word2id, emb_matrix, char2id ,id2char)
+            # A list to store the output of all predictions
+            # each entry is a map, storing the start and end dist for that batch.
+            # len(ensemble_model_pred) is len(models)
+            # len(ensemble_model_pred[0]) is number of batches
+            # len(ensemble_model_pred[0]['start']) is batch_size
+            # len(ensemble_model_pred[0]['end']) is batch_size
+            ensemble_model_pred = [] 
+            for model in models:
+                tf.reset_default_graph()
+                print "Loading model: %s" % model 
+                # TODO(binbinx): change this to appropriate models
+                qa_model = QAModel(FLAGS, id2word, word2id, emb_matrix, char2id ,id2char)
                     
+                with tf.Session(config=config) as sess:
                     # Initialize bestmodel directory
                     ckpt_load_dir = os.path.join(EXPERIMENTS_DIR, model, "best_checkpoint")
                     
@@ -345,17 +345,18 @@ def main(unused_argv):
                     answers_dict = generate_answers(sess, qa_model, word2id, char2id, qn_uuid_data_, 
                                                     context_token_data_, qn_token_data_, ensemble_model_pred)
                     
-                pred_start_batches, pred_end_batches = resolve_ensemble_model_preds(ensemble_model_pred)
+            pred_start_batches, pred_end_batches = resolve_ensemble_model_preds(ensemble_model_pred)
                 
-                final_ans_dict = generate_answers_with_start_end(FLAGS, word2id, char2id, qn_uuid_data, 
-                     context_token_data, qn_token_data, pred_start_batches, pred_end_batches)
+            final_ans_dict = generate_answers_with_start_end(FLAGS, word2id, char2id, qn_uuid_data, 
+                 context_token_data, qn_token_data, pred_start_batches, pred_end_batches)
                 
-                # Write the uuid->answer mapping a to json file in root dir
-                print "Writing predictions to %s..." % FLAGS.json_out_path
-                with io.open(FLAGS.json_out_path, 'w', encoding='utf-8') as f:
-                    f.write(unicode(json.dumps(final_ans_dict, ensure_ascii=False)))
-                    print "Wrote predictions to %s" % FLAGS.json_out_path
-            else:
+            # Write the uuid->answer mapping a to json file in root dir
+            print "Writing predictions to %s..." % FLAGS.json_out_path
+            with io.open(FLAGS.json_out_path, 'w', encoding='utf-8') as f:
+                f.write(unicode(json.dumps(final_ans_dict, ensure_ascii=False)))
+                print "Wrote predictions to %s" % FLAGS.json_out_path
+        else:
+            with tf.Session(config=config) as sess:
                 # Load model from ckpt_load_dir
                 initialize_model(sess, qa_model, FLAGS.ckpt_load_dir, expect_exists=True)
 
