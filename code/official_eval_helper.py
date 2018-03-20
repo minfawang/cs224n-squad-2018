@@ -235,8 +235,9 @@ def get_json_data(data_filename):
 
     return qn_uuid_data, context_token_data, qn_token_data
 
-
-def generate_answers(session, model, word2id, char2id, qn_uuid_data, context_token_data, qn_token_data):
+  
+def generate_answers_with_start_end(session, model_flags, word2id, char2id, qn_uuid_data, 
+                     context_token_data, qn_token_data, pred_start_batches, pred_end_batches):
     """
     Given a model, and a set of (context, question) pairs, each with a unique ID,
     use the model to generate an answer for each pair, and return a dictionary mapping
@@ -244,27 +245,32 @@ def generate_answers(session, model, word2id, char2id, qn_uuid_data, context_tok
 
     Inputs:
       session: TensorFlow session
-      model: QAModel
+      model_flags: QAModel flags, batch size, must be the same for all models.
       word2id: dictionary mapping word (string) to word id (int)
       qn_uuid_data, context_token_data, qn_token_data: lists
+      pred_start_batches, pred_end_batches: list of list, size is model_flags.batch_size
 
     Outputs:
       uuid2ans: dictionary mapping uuid (string) to predicted answer (string; detokenized)
     """
+    assert model_flags.batch_size == len(pred_start_batches)
+    assert model_flags.batch_size == len(pred_end_batches)
+    
     uuid2ans = {} # maps uuid to string containing predicted answer
     data_size = len(qn_uuid_data)
-    num_batches = ((data_size-1) / model.FLAGS.batch_size) + 1
+    num_batches = ((data_size-1) / model_flags.batch_size) + 1
     batch_num = 0
     detokenizer = MosesDetokenizer()
-
+    
     print "Generating answers..."
 
     for batch in get_batch_generator(word2id, char2id, qn_uuid_data, context_token_data, 
-                                     qn_token_data, model.FLAGS.batch_size, 
-                                     model.FLAGS.context_len, model.FLAGS.question_len, model.FLAGS.word_len):
+                                     qn_token_data, model_flags.batch_size, 
+                                     model_flags.context_len, model_flags.question_len, model_flags.word_len):
 
         # Get the predicted spans
-        pred_start_batch, pred_end_batch = model.get_start_end_pos(session, batch)
+        pred_start_batch = pred_start_batches[batch_num]
+        pred_end_batch = pred_end_batches[batch_num]
 
         # Convert pred_start_batch and pred_end_batch to lists length batch_size
         pred_start_batch = pred_start_batch.tolist()
@@ -286,12 +292,92 @@ def generate_answers(session, model, word2id, char2id, qn_uuid_data, context_tok
             # Detokenize and add to dict
             uuid = batch.uuids[ex_idx]
             uuid2ans[uuid] = detokenizer.detokenize(pred_ans_tokens, return_str=True)
+            
+        batch_num += 1
+
+        if batch_num % 10 == 0:
+            print "Generated answers for %i/%i batches = %.2f%%" % (batch_num, num_batches, batch_num*100.0/num_batches)
+
+    print "Finished generating answers for dataset."
+
+    return uuid2ans
+
+
+def generate_answers(session, model, word2id, char2id, qn_uuid_data, 
+                     context_token_data, qn_token_data, ensemble_models=None):
+    """
+    Given a model, and a set of (context, question) pairs, each with a unique ID,
+    use the model to generate an answer for each pair, and return a dictionary mapping
+    each unique ID to the generated answer.
+
+    Inputs:
+      session: TensorFlow session
+      model: QAModel
+      word2id: dictionary mapping word (string) to word id (int)
+      qn_uuid_data, context_token_data, qn_token_data: lists
+      ensemble_models: if set, append the prediction with weight to this list.
+
+    Outputs:
+      uuid2ans: dictionary mapping uuid (string) to predicted answer (string; detokenized)
+    """
+    uuid2ans = {} # maps uuid to string containing predicted answer
+    data_size = len(qn_uuid_data)
+    num_batches = ((data_size-1) / model.FLAGS.batch_size) + 1
+    batch_num = 0
+    detokenizer = MosesDetokenizer()
+
+    print "Generating answers..."
+
+    for batch in get_batch_generator(word2id, char2id, qn_uuid_data, context_token_data, 
+                                     qn_token_data, model.FLAGS.batch_size, 
+                                     model.FLAGS.context_len, model.FLAGS.question_len, model.FLAGS.word_len):
+
+        # Get start_dist and end_dist, both shape (batch_size, context_len)
+        start_dist, end_dist = model.get_prob_dists(session, batch)
+
+        # Take argmax to get start_pos and end_post, both shape (batch_size)
+        pred_start_batch = np.argmax(start_dist, axis=1)
+        pred_end_batch = np.argmax(end_dist, axis=1)
+        
+        # Convert pred_start_batch and pred_end_batch to lists length batch_size
+        pred_start_batch = pred_start_batch.tolist()
+        pred_end_batch = pred_end_batch.tolist()
+        start_dist = start_dist.tolist()
+        end_dist = end_dist.tolist()
+
+        # Container for ensemble models, refresh every batch.
+        model_pred = []
+        
+        # For each example in the batch:
+        for ex_idx, (pred_start, pred_end) in enumerate(zip(pred_start_batch, pred_end_batch)):
+
+            # Original context tokens (no UNKs or padding) for this example
+            context_tokens = batch.context_tokens[ex_idx] # list of strings
+
+            # Check the predicted span is in range
+            assert pred_start in range(len(context_tokens))
+            assert pred_end in range(len(context_tokens))
+
+            # Predicted answer tokens
+            pred_ans_tokens = context_tokens[pred_start : pred_end +1] # list of strings
+
+            # Detokenize and add to dict
+            uuid = batch.uuids[ex_idx]
+            uuid2ans[uuid] = detokenizer.detokenize(pred_ans_tokens, return_str=True)
+            
+        if ensemble_models is not None:
+            # Record the model output and append to ensemble_models
+            batch_pred = {}
+            batch_pred['start'] = start_dist
+            batch_pred['end'] = end_dist
+            model_pred.append(batch_pred)
 
         batch_num += 1
 
         if batch_num % 10 == 0:
             print "Generated answers for %i/%i batches = %.2f%%" % (batch_num, num_batches, batch_num*100.0/num_batches)
 
+    ensemble_models.append(model_pred)
     print "Finished generating answers for dataset."
 
     return uuid2ans

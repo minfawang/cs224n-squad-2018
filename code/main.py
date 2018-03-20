@@ -22,7 +22,9 @@ import io
 import json
 import sys
 import logging
+import heapq
 
+import numpy as np
 import tensorflow as tf
 
 from cnn_qa_model import QAModel
@@ -74,6 +76,12 @@ tf.app.flags.DEFINE_string("ckpt_load_dir", "", "For official_eval mode, which d
 tf.app.flags.DEFINE_string("json_in_path", "", "For official_eval mode, path to JSON input file. You need to specify this for official_eval_mode.")
 tf.app.flags.DEFINE_string("json_out_path", "predictions.json", "Output path for official_eval mode. Defaults to predictions.json")
 
+# Flags for ensemble model
+tf.app.flags.DEFINE_bool("enable_ensemble_model", False, "Flag to control whether to ensemble multiple models or not.")
+tf.app.flags.DEFINE_string("ensemble_model_names", "", "A list of model names to ensemble separated by ;")
+tf.app.flags.DEFINE_string('ensemble_schema', "sum", "Schema used to ensemble models.")
+tf.app.flags.DEFINE_bool("enable_beam_search", False, "Use beam search in prediction.")
+tf.app.flags.DEFINE_integer("beam_search_size", 5, "Size of the beam search.")
 
 FLAGS = tf.app.flags.FLAGS
 os.environ["CUDA_VISIBLE_DEVICES"] = str(FLAGS.gpu)
@@ -105,6 +113,95 @@ def initialize_model(session, model, train_dir, expect_exists):
             print 'Num params: %d' % sum(v.get_shape().num_elements() for v in tf.trainable_variables())
 
 
+def resolve_ensemble_model_preds(ensemble_model_pred, ensemble_schema, 
+                                 enable_beam_search=FLAGS.enable_beam_search, beam_search_size=FLAGS.beam_search_size):
+    """ Resolve the prediction of multiple models according to ensemble_schema
+
+    Input:
+      ensemble_model_pred: list of list of list of map, 
+      [  
+        model_1_pred [
+          batch1 {
+            'start': 2d array of size batch_size * context_len
+            'end': 2d array of size batch_size * context_len
+          },
+          batch2,
+          ...
+        ],
+        model_2_pred,
+        ...
+      ]
+      
+      ensemble_schema: 
+        'sum' means averaging over all pred, 
+        'max' means keeping the max over all pred, 
+        (NotSupported)'conf' means keeping the highest confidence score.
+
+    Return:
+      pred_start_batches, pred_end_batches: list of list, size is model_flags.batch_size
+
+    """
+    def nlargest(start_dist_example):
+        return heapq.nlargest(beam_search_size, enumerate(start_dist_example), lambda (i, prob): (prob, i))   
+    
+    def beam_search(top_start_idx_probs, top_end_idx_probs):
+        """Find the (start_i, end_i) pair that end_i >= start_i and start_prob + end_prob is max.
+        """
+        max_prob, max_pair = 0.0, None
+        for start_i, start_prob in top_start_idx_probs:
+            for end_i, end_prob in top_end_idx_probs:
+                if end_i < start_i:
+                    continue
+                cur_prob = start_prob + end_prob
+                cur_pair = (start_i, end_i)
+                if cur_prob > max_prob:
+                    max_prob, max_pair = cur_prob, cur_pair
+
+        if max_pair is None:
+            i = start_i if start_prob > end_prob else end_i
+            return (i, i)
+
+        return max_pair
+          
+    pred_start_batches = []
+    pred_end_batches = []
+    
+    num_batch = len(ensemble_model_pred[0])
+    context_len = len(ensemble_model_pred[0][0]['start'][0])
+
+    for i in range(0, num_batch)
+        # For each batch
+        batch_size = len(ensemble_model_pred[0][i]['start'])
+        start_batch = np.zeros((batch_size, context_len))
+        end_batch = np.zeros((batch_size, context_len))
+        for model in ensemble_model_pred:
+            # For each model
+            if ensemble_schema == 'sum':
+                start_batch += model[i]['start']
+                end_batch += model[i]['end']
+            elif ensemble_schema == 'max':
+                start_batch = np.maximum(start_batch, model[i]['start'])
+                end_batch = np.maximum(start_batch, model[i]['end'])
+            else:
+                print "ERROR: ensemble schema not supported: " %ensemble_schema
+        
+        if enable_beam_search:
+            # Make final predictions using beam search
+            start_idx_prob_pairs = map(nlargest, start_batch)
+            end_idx_prob_pairs = map(nlargest, end_batch)
+            start_end_pos_pairs = [ 
+                beam_search(start_prob_idxs, end_prob_idxs)
+                for start_prob_idxs, end_prob_idxs
+                in zip(start_idx_prob_pairs, end_idx_prob_pairs)]
+            start_pos, end_pos = np.array(zip(*start_end_pos_pairs))
+            pred_start_batches.append(start_pos)
+            pred_end_batches.append(end_pos)
+        else:
+            pred_start_batches.append(np.argmax(start_batch, axis=1))
+            pred_end_batches.append(np.argmax(end_batch, axis=1))
+    return pred_start_batches, pred_end_batches
+  
+
 def main(unused_argv):
     # Print an error message if you've entered flags incorrectly
     if len(unused_argv) != 1:
@@ -113,13 +210,17 @@ def main(unused_argv):
     # Check for Python 2
     if sys.version_info[0] != 2:
         raise Exception("ERROR: You must use Python 2 but you are running Python %i" % sys.version_info[0])
-
+        
+    # Check for ensemble model param setting
+    if FLAGS.enable_ensemble_model and FLAGS.mode != "official_eval":
+        raise Exception("ERROR: model ensemble is only supported in official_eval mode.")
+      
     # Print out Tensorflow version
     print "This code was developed and tested on TensorFlow 1.4.1. Your TensorFlow version: %s" % tf.__version__
 
     # Define train_dir
-    if not FLAGS.experiment_name and not FLAGS.train_dir and FLAGS.mode != "official_eval":
-        raise Exception("You need to specify either --experiment_name or --train_dir")
+    if (!FLAGS.enable_ensemble_model and not FLAGS.experiment_name and not FLAGS.train_dir and FLAGS.mode != "official_eval") or (FLAGS.enable_ensemble_model and not FLAGS.ensemble_model_names):
+        raise Exception("You need to specify either --experiment_name or --train_dir, or ensemble_model_names if ensemble is enabled.")
     FLAGS.train_dir = FLAGS.train_dir or os.path.join(EXPERIMENTS_DIR, FLAGS.experiment_name)
 
     # Initialize bestmodel directory
@@ -142,8 +243,11 @@ def main(unused_argv):
     dev_qn_path = os.path.join(FLAGS.data_dir, "dev.question")
     dev_ans_path = os.path.join(FLAGS.data_dir, "dev.span")
 
-    # Initialize model
-    qa_model = QAModel(FLAGS, id2word, word2id, emb_matrix, char2id ,id2char)
+    
+    if !FLAGS.enable_ensemble_model:
+        # Initialize model only when ensemble model is disabled.
+        # TODO(change QAModel for ensemble method.)
+        qa_model = QAModel(FLAGS, id2word, word2id, emb_matrix, char2id ,id2char)
 
     # Some GPU settings
     config=tf.ConfigProto()
@@ -177,10 +281,10 @@ def main(unused_argv):
 
     elif FLAGS.mode == "show_examples":
         with tf.Session(config=config) as sess:
-
+            
             # Load best model
             initialize_model(sess, qa_model, bestmodel_dir, expect_exists=True)
-
+            
             # Show examples with F1/EM scores
             _, _ = qa_model.check_f1_em(sess, dev_context_path, dev_qn_path, dev_ans_path, "dev", num_samples=10, print_to_screen=True)
 
@@ -195,19 +299,50 @@ def main(unused_argv):
         qn_uuid_data, context_token_data, qn_token_data = get_json_data(FLAGS.json_in_path)
 
         with tf.Session(config=config) as sess:
+            
+            if enable_model_ensemble:
+                models = FLAGS.ensemble_model_names.split(';')
+                # A list to store the output of all predictions
+                # each entry is a map, storing the start and end dist for that batch.
+                # len(ensemble_model_pred) is len(models)
+                # len(ensemble_model_pred[0]) is number of batches
+                # len(ensemble_model_pred[0]['start']) is batch_size
+                # len(ensemble_model_pred[0]['end']) is batch_size
+                ensemble_model_pred = [] 
+                for model in models:
+                    print "Loading model: " % model   
+                    qa_model = QAModel(FLAGS, id2word, word2id, emb_matrix, char2id ,id2char)
+                    
+                    # Load model from ckpt_load_dir
+                    initialize_model(sess, qa_model, FLAGS.ckpt_load_dir, expect_exists=True)
 
-            # Load model from ckpt_load_dir
-            initialize_model(sess, qa_model, FLAGS.ckpt_load_dir, expect_exists=True)
+                    # Get a predicted answer for each example in the data
+                    # Return a mapping answers_dict from uuid to answer
+                    answers_dict = generate_answers(sess, qa_model, word2id, char2id, qn_uuid_data, 
+                                                    context_token_data, qn_token_data, ensemble_model_pred)
+                
+                pred_start_batches, pred_end_batches = resolve_ensemble_model_preds(ensemble_model_pred, FLAGS.ensemble_schema)
+                final_ans_dict = generate_answers_with_start_end(session, FLAGS, word2id, char2id, qn_uuid_data, 
+                     context_token_data, qn_token_data, pred_start_batches, pred_end_batches)
+                
+                # Write the uuid->answer mapping a to json file in root dir
+                print "Writing predictions to %s..." % FLAGS.json_out_path
+                with io.open(FLAGS.json_out_path, 'w', encoding='utf-8') as f:
+                    f.write(unicode(json.dumps(final_ans_dict, ensure_ascii=False)))
+                    print "Wrote predictions to %s" % FLAGS.json_out_path
+            else:
+                # Load model from ckpt_load_dir
+                initialize_model(sess, qa_model, FLAGS.ckpt_load_dir, expect_exists=True)
 
-            # Get a predicted answer for each example in the data
-            # Return a mapping answers_dict from uuid to answer
-            answers_dict = generate_answers(sess, qa_model, word2id, char2id, qn_uuid_data, context_token_data, qn_token_data)
+                # Get a predicted answer for each example in the data
+                # Return a mapping answers_dict from uuid to answer
+                answers_dict = generate_answers(sess, qa_model, word2id, char2id, qn_uuid_data, context_token_data, qn_token_data)
 
-            # Write the uuid->answer mapping a to json file in root dir
-            print "Writing predictions to %s..." % FLAGS.json_out_path
-            with io.open(FLAGS.json_out_path, 'w', encoding='utf-8') as f:
-                f.write(unicode(json.dumps(answers_dict, ensure_ascii=False)))
-                print "Wrote predictions to %s" % FLAGS.json_out_path
+                # Write the uuid->answer mapping a to json file in root dir
+                print "Writing predictions to %s..." % FLAGS.json_out_path
+                with io.open(FLAGS.json_out_path, 'w', encoding='utf-8') as f:
+                    f.write(unicode(json.dumps(answers_dict, ensure_ascii=False)))
+                    print "Wrote predictions to %s" % FLAGS.json_out_path
 
 
     else:
