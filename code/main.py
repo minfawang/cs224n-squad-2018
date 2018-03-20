@@ -81,8 +81,10 @@ tf.app.flags.DEFINE_string("json_out_path", "predictions.json", "Output path for
 tf.app.flags.DEFINE_bool("enable_ensemble_model", False, "Flag to control whether to ensemble multiple models or not.")
 tf.app.flags.DEFINE_string("ensemble_model_names", "", "A list of model names to ensemble separated by ;")
 tf.app.flags.DEFINE_string('ensemble_schema', "sum", "Schema used to ensemble models.")
+tf.app.flags.DEFINE_string("sum_weights", "", "If use sum schema, can optionally pass weights here. A list of weights separated by ;. If not set, assume all weights are 1.0")
 tf.app.flags.DEFINE_bool("enable_beam_search", False, "Use beam search in prediction.")
 tf.app.flags.DEFINE_integer("beam_search_size", 5, "Size of the beam search.")
+
 
 FLAGS = tf.app.flags.FLAGS
 os.environ["CUDA_VISIBLE_DEVICES"] = str(FLAGS.gpu)
@@ -114,7 +116,7 @@ def initialize_model(session, model, train_dir, expect_exists):
             print 'Num params: %d' % sum(v.get_shape().num_elements() for v in tf.trainable_variables())
 
 
-def resolve_ensemble_model_preds(ensemble_model_pred, ensemble_schema, 
+def resolve_ensemble_model_preds(ensemble_model_pred, ensemble_schema=FLAGS.ensemble_schema, sum_weights=FLAGS.sum_weights,
                                  enable_beam_search=FLAGS.enable_beam_search, beam_search_size=FLAGS.beam_search_size):
     """ Resolve the prediction of multiple models according to ensemble_schema
 
@@ -163,7 +165,14 @@ def resolve_ensemble_model_preds(ensemble_model_pred, ensemble_schema,
             return (i, i)
 
         return max_pair
-          
+    
+    # validate flag value
+    sum_weight = np.ones(len(ensemble_model_pred))
+    if ensemble_schema == 'sum'
+        weights = np.array([float(w) for w in sum_weights.split(';')])
+        assert len(ensemble_model_pred) == len(weights)
+        sum_weight = weights
+    
     pred_start_batches = []
     pred_end_batches = []
     
@@ -175,6 +184,8 @@ def resolve_ensemble_model_preds(ensemble_model_pred, ensemble_schema,
         batch_size = len(ensemble_model_pred[0][i]['start'])
         start_batch = np.zeros((batch_size, context_len))
         end_batch = np.zeros((batch_size, context_len))
+        
+        
         for model in ensemble_model_pred:
           
             assert model[i]['start'].shape == start_batch.shape
@@ -182,8 +193,8 @@ def resolve_ensemble_model_preds(ensemble_model_pred, ensemble_schema,
             
             # For each model
             if ensemble_schema == 'sum':
-                start_batch += model[i]['start']
-                end_batch += model[i]['end']
+                start_batch += sum_weight[i] * model[i]['start']
+                end_batch += sum_weight[i] * model[i]['end']
             elif ensemble_schema == 'max':
                 start_batch = np.maximum(start_batch, model[i]['start'])
                 end_batch = np.maximum(start_batch, model[i]['end'])
@@ -315,7 +326,8 @@ def main(unused_argv):
                 # len(ensemble_model_pred[0]['end']) is batch_size
                 ensemble_model_pred = [] 
                 for model in models:
-                    print "Loading model: %s" % model   
+                    print "Loading model: %s" % model 
+                    # TODO(binbinx): change this to appropriate models
                     qa_model = QAModel(FLAGS, id2word, word2id, emb_matrix, char2id ,id2char)
                     
                     # Initialize bestmodel directory
@@ -333,7 +345,7 @@ def main(unused_argv):
                     answers_dict = generate_answers(sess, qa_model, word2id, char2id, qn_uuid_data_, 
                                                     context_token_data_, qn_token_data_, ensemble_model_pred)
                     
-                pred_start_batches, pred_end_batches = resolve_ensemble_model_preds(ensemble_model_pred, FLAGS.ensemble_schema)
+                pred_start_batches, pred_end_batches = resolve_ensemble_model_preds(ensemble_model_pred)
                 
                 final_ans_dict = generate_answers_with_start_end(FLAGS, word2id, char2id, qn_uuid_data, 
                      context_token_data, qn_token_data, pred_start_batches, pred_end_batches)
