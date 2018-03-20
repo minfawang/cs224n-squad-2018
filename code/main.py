@@ -17,6 +17,7 @@
 from __future__ import absolute_import
 from __future__ import division
 
+import copy
 import os
 import io
 import json
@@ -29,7 +30,7 @@ import tensorflow as tf
 
 from cnn_qa_model import QAModel
 from vocab import get_glove, get_char_mapping
-from official_eval_helper import get_json_data, generate_answers
+from official_eval_helper import get_json_data, generate_answers, generate_answers_with_start_end
 
 
 logging.basicConfig(level=logging.INFO)
@@ -175,6 +176,10 @@ def resolve_ensemble_model_preds(ensemble_model_pred, ensemble_schema,
         start_batch = np.zeros((batch_size, context_len))
         end_batch = np.zeros((batch_size, context_len))
         for model in ensemble_model_pred:
+          
+            assert model[i]['start'].shape == start_batch.shape
+            assert model[i]['end'].shape == end_batch.shape            
+            
             # For each model
             if ensemble_schema == 'sum':
                 start_batch += model[i]['start']
@@ -212,8 +217,8 @@ def main(unused_argv):
         raise Exception("ERROR: You must use Python 2 but you are running Python %i" % sys.version_info[0])
         
     # Check for ensemble model param setting
-    if FLAGS.enable_ensemble_model and FLAGS.mode != "official_eval":
-        raise Exception("ERROR: model ensemble is only supported in official_eval mode.")
+    if FLAGS.enable_ensemble_model and (FLAGS.mode != "official_eval" or not FLAGS.ensemble_model_names):
+        raise Exception("ERROR: model ensemble is only supported in official_eval mode, you must specify ensemble_model_names")
       
     # Print out Tensorflow version
     print "This code was developed and tested on TensorFlow 1.4.1. Your TensorFlow version: %s" % tf.__version__
@@ -291,16 +296,17 @@ def main(unused_argv):
     elif FLAGS.mode == "official_eval":
         if FLAGS.json_in_path == "":
             raise Exception("For official_eval mode, you need to specify --json_in_path")
-        if FLAGS.ckpt_load_dir == "":
-            raise Exception("For official_eval mode, you need to specify --ckpt_load_dir")
+        if not FLAGS.enable_ensemble_model and FLAGS.ckpt_load_dir == "":
+            raise Exception("For official_eval mode, you need to specify --ckpt_load_dir or use ensemble_model_names")
 
         # Read the JSON data from file
         qn_uuid_data, context_token_data, qn_token_data = get_json_data(FLAGS.json_in_path)
-
+        
         with tf.Session(config=config) as sess:
             
             if FLAGS.enable_ensemble_model:
                 models = FLAGS.ensemble_model_names.split(';')
+
                 # A list to store the output of all predictions
                 # each entry is a map, storing the start and end dist for that batch.
                 # len(ensemble_model_pred) is len(models)
@@ -312,16 +318,24 @@ def main(unused_argv):
                     print "Loading model: %s" % model   
                     qa_model = QAModel(FLAGS, id2word, word2id, emb_matrix, char2id ,id2char)
                     
+                    # Initialize bestmodel directory
+                    ckpt_load_dir = os.path.join(EXPERIMENTS_DIR, model, "best_checkpoint")
+                    
                     # Load model from ckpt_load_dir
-                    initialize_model(sess, qa_model, FLAGS.ckpt_load_dir, expect_exists=True)
+                    initialize_model(sess, qa_model, ckpt_load_dir, expect_exists=True)
 
                     # Get a predicted answer for each example in the data
                     # Return a mapping answers_dict from uuid to answer
-                    answers_dict = generate_answers(sess, qa_model, word2id, char2id, qn_uuid_data, 
-                                                    context_token_data, qn_token_data, ensemble_model_pred)
-                
+                    # WE MUST USE A DEEPCOPY HERE!!
+                    qn_uuid_data_ = copy.deepcopy(qn_uuid_data)
+                    context_token_data_ = copy.deepcopy(context_token_data)
+                    qn_token_data_ = copy.deepcopy(qn_token_data)
+                    answers_dict = generate_answers(sess, qa_model, word2id, char2id, qn_uuid_data_, 
+                                                    context_token_data_, qn_token_data_, ensemble_model_pred)
+                    
                 pred_start_batches, pred_end_batches = resolve_ensemble_model_preds(ensemble_model_pred, FLAGS.ensemble_schema)
-                final_ans_dict = generate_answers_with_start_end(session, FLAGS, word2id, char2id, qn_uuid_data, 
+                
+                final_ans_dict = generate_answers_with_start_end(FLAGS, word2id, char2id, qn_uuid_data, 
                      context_token_data, qn_token_data, pred_start_batches, pred_end_batches)
                 
                 # Write the uuid->answer mapping a to json file in root dir
