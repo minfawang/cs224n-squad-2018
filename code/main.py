@@ -318,9 +318,9 @@ def main(unused_argv):
             # KV is 'label': ('model_file', 'exp_name'),
             ensemble_label_to_model_meta = {
                 'binco_legacy': ['binco_legacy_model', 'binco_30b15_hidden=100_lr=0.001_batch=100_context=400_qn=27', False],  # 0.6900
-                'chgasebinco': ['chgasebinco_model', 'chgasebinco_1c999_hidden=100_lr=0.001_batch=100_context=400_qn=27', True]  # 0.7101
-                'chsebinco_real': ['chsebinco_model', 'chsebinco_real_1c999_hidden=100_lr=0.001_batch=100_context=400_qn=27', True]  # 0.6958
-                'chsebinco_legacy': ['chsebinco_legacy_model', 'chsebinco_4a81a_hidden=100_lr=0.001_batch=100_context=400_qn=27', True]  # 0.6954
+                'chgasebinco': ['chgasebinco_model', 'chgasebinco_1c999_hidden=100_lr=0.001_batch=100_context=400_qn=27', True],  # 0.7101
+                'chsebinco_real': ['chsebinco_model', 'chsebinco_real_1c999_hidden=100_lr=0.001_batch=100_context=400_qn=27', True],  # 0.6958
+                'chsebinco_legacy': ['chsebinco_legacy_model', 'chsebinco_4a81a_hidden=100_lr=0.001_batch=100_context=400_qn=27', True],  # 0.6954
             }
             # model_labels = FLAGS.ensemble_model_names.split(';')
             model_labels = ensemble_label_to_model_meta.keys()
