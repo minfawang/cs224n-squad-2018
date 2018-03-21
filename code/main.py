@@ -87,6 +87,7 @@ tf.app.flags.DEFINE_string('ensemble_schema', "sum", "Schema used to ensemble mo
 tf.app.flags.DEFINE_string("sum_weights", "", "If use sum schema, can optionally pass weights here. A list of weights separated by ;. If not set, assume all weights are 1.0. 'default' is a special value.")
 tf.app.flags.DEFINE_bool("enable_beam_search", False, "Use beam search in prediction.")
 tf.app.flags.DEFINE_integer("beam_search_size", 5, "Size of the beam search.")
+tf.app.flags.DEFINE_integer("max_ans_len", 15, "Max answer length allowed to make predictions.")
 
 
 FLAGS = tf.app.flags.FLAGS
@@ -151,12 +152,12 @@ def resolve_ensemble_model_preds(ensemble_model_pred, ensemble_schema=FLAGS.ense
         return heapq.nlargest(beam_search_size, enumerate(start_dist_example), lambda (i, prob): (prob, i))
 
     def beam_search(top_start_idx_probs, top_end_idx_probs):
-        """Find the (start_i, end_i) pair that 15 >= end_i >= start_i and start_prob * end_prob is max.
+        """Find the (start_i, end_i) pair that max_ans_len >= end_i >= start_i and start_prob * end_prob is max.
         """
         max_prob, max_pair = 0.0, None
         for start_i, start_prob in top_start_idx_probs:
             for end_i, end_prob in top_end_idx_probs:
-                if (end_i < start_i) or (end_i - start_i >= 15):
+                if (end_i < start_i) or (end_i - start_i >= FLAGS.max_ans_len):
                     continue
                 cur_prob = start_prob * end_prob
                 cur_pair = (start_i, end_i)
