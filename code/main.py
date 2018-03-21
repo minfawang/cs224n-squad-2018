@@ -342,7 +342,7 @@ def main(unused_argv):
             for label in model_labels:
                 tf.reset_default_graph()
                 model_name, model_exp_name, has_cnn, weight = ensemble_label_to_model_meta[label]
-                sum_weights_list += weight,
+                sum_weights_list += str(weight),
                 print "Loading model: %s" % model_name
                 # TODO(binbinx): change this to appropriate models
                 QAModel = importlib.import_module(model_name).QAModel
