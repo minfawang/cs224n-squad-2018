@@ -265,7 +265,9 @@ def main(unused_argv):
 
     if not FLAGS.enable_ensemble_model:
         # Initialize model only when ensemble model is disabled.
-        QAModel = importlib.import_module(FLAGS.model_name).QAModel
+        qa_model_name = FLAGS.model_name + '_model'
+        QAModel = importlib.import_module(qa_model_name).QAModel
+        print('model loaded from: %s' % qa_model_name)
         qa_model = QAModel(FLAGS, id2word, word2id, emb_matrix, char2id ,id2char)
 
     # Some GPU settings
