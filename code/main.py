@@ -24,11 +24,12 @@ import json
 import sys
 import logging
 import heapq
+import importlib
 
 import numpy as np
 import tensorflow as tf
 
-from cnn_qa_model import QAModel
+# from cnn_qa_model import QAModel
 from vocab import get_glove, get_char_mapping
 from official_eval_helper import get_json_data, generate_answers, generate_answers_with_start_end
 
@@ -121,8 +122,8 @@ def resolve_ensemble_model_preds(ensemble_model_pred, ensemble_schema=FLAGS.ense
     """ Resolve the prediction of multiple models according to ensemble_schema
 
     Input:
-      ensemble_model_pred: list of list of list of map, 
-      [  
+      ensemble_model_pred: list of list of list of map,
+      [
         model_1_pred [
           batch1 {
             'start': 2d array of size batch_size * context_len
@@ -134,10 +135,10 @@ def resolve_ensemble_model_preds(ensemble_model_pred, ensemble_schema=FLAGS.ense
         model_2_pred,
         ...
       ]
-      
-      ensemble_schema: 
-        'sum' means averaging over all pred, 
-        'max' means keeping the max over all pred, 
+
+      ensemble_schema:
+        'sum' means averaging over all pred,
+        'max' means keeping the max over all pred,
         (NotSupported)'conf' means keeping the highest confidence score.
 
     Return:
@@ -145,8 +146,8 @@ def resolve_ensemble_model_preds(ensemble_model_pred, ensemble_schema=FLAGS.ense
 
     """
     def nlargest(start_dist_example):
-        return heapq.nlargest(beam_search_size, enumerate(start_dist_example), lambda (i, prob): (prob, i))   
-    
+        return heapq.nlargest(beam_search_size, enumerate(start_dist_example), lambda (i, prob): (prob, i))
+
     def beam_search(top_start_idx_probs, top_end_idx_probs):
         """Find the (start_i, end_i) pair that end_i >= start_i and start_prob + end_prob is max.
         """
@@ -165,17 +166,17 @@ def resolve_ensemble_model_preds(ensemble_model_pred, ensemble_schema=FLAGS.ense
             return (i, i)
 
         return max_pair
-    
+
     # validate flag value
     sum_weight = np.ones(len(ensemble_model_pred))
     if ensemble_schema == "sum" and len(sum_weights)>0:
         weights = np.array([float(w) for w in sum_weights.split(';')])
         assert len(ensemble_model_pred) == len(weights)
         sum_weight = weights
-    
+
     pred_start_batches = []
     pred_end_batches = []
-    
+
     num_batch = len(ensemble_model_pred[0])
     context_len = len(ensemble_model_pred[0][0]['start'][0])
 
@@ -184,13 +185,13 @@ def resolve_ensemble_model_preds(ensemble_model_pred, ensemble_schema=FLAGS.ense
         batch_size = len(ensemble_model_pred[0][i]['start'])
         start_batch = np.zeros((batch_size, context_len))
         end_batch = np.zeros((batch_size, context_len))
-        
-        
+
+
         for m in range(0, len(ensemble_model_pred)):
             model = ensemble_model_pred[m]
             assert model[i]['start'].shape == start_batch.shape
-            assert model[i]['end'].shape == end_batch.shape            
-            
+            assert model[i]['end'].shape == end_batch.shape
+
             # For each model
             if ensemble_schema == 'sum':
                 start_batch += sum_weight[m] * model[i]['start']
@@ -200,12 +201,12 @@ def resolve_ensemble_model_preds(ensemble_model_pred, ensemble_schema=FLAGS.ense
                 end_batch = np.maximum(start_batch, model[i]['end'])
             else:
                 print "ERROR: ensemble schema not supported: " %ensemble_schema
-        
+
         if enable_beam_search:
             # Make final predictions using beam search
             start_idx_prob_pairs = map(nlargest, start_batch)
             end_idx_prob_pairs = map(nlargest, end_batch)
-            start_end_pos_pairs = [ 
+            start_end_pos_pairs = [
                 beam_search(start_prob_idxs, end_prob_idxs)
                 for start_prob_idxs, end_prob_idxs
                 in zip(start_idx_prob_pairs, end_idx_prob_pairs)]
@@ -216,7 +217,7 @@ def resolve_ensemble_model_preds(ensemble_model_pred, ensemble_schema=FLAGS.ense
             pred_start_batches.append(np.argmax(start_batch, axis=1))
             pred_end_batches.append(np.argmax(end_batch, axis=1))
     return pred_start_batches, pred_end_batches
-  
+
 
 def main(unused_argv):
     # Print an error message if you've entered flags incorrectly
@@ -226,11 +227,11 @@ def main(unused_argv):
     # Check for Python 2
     if sys.version_info[0] != 2:
         raise Exception("ERROR: You must use Python 2 but you are running Python %i" % sys.version_info[0])
-        
+
     # Check for ensemble model param setting
     if FLAGS.enable_ensemble_model and (FLAGS.mode != "official_eval" or not FLAGS.ensemble_model_names):
         raise Exception("ERROR: model ensemble is only supported in official_eval mode, you must specify ensemble_model_names")
-      
+
     # Print out Tensorflow version
     print "This code was developed and tested on TensorFlow 1.4.1. Your TensorFlow version: %s" % tf.__version__
 
@@ -247,7 +248,7 @@ def main(unused_argv):
 
     # Load embedding matrix and vocab mappings
     emb_matrix, word2id, id2word = get_glove(FLAGS.glove_path, FLAGS.embedding_size)
-    
+
     # Build character level vocab mappings
     char2id, id2char = get_char_mapping()
 
@@ -259,7 +260,7 @@ def main(unused_argv):
     dev_qn_path = os.path.join(FLAGS.data_dir, "dev.question")
     dev_ans_path = os.path.join(FLAGS.data_dir, "dev.span")
 
-    
+
     if not FLAGS.enable_ensemble_model:
         # Initialize model only when ensemble model is disabled.
         qa_model = QAModel(FLAGS, id2word, word2id, emb_matrix, char2id ,id2char)
@@ -296,10 +297,10 @@ def main(unused_argv):
 
     elif FLAGS.mode == "show_examples":
         with tf.Session(config=config) as sess:
-            
+
             # Load best model
             initialize_model(sess, qa_model, bestmodel_dir, expect_exists=True)
-            
+
             # Show examples with F1/EM scores
             _, _ = qa_model.check_f1_em(sess, dev_context_path, dev_qn_path, dev_ans_path, "dev", num_samples=10, print_to_screen=True)
 
@@ -312,27 +313,38 @@ def main(unused_argv):
 
         # Read the JSON data from file
         qn_uuid_data, context_token_data, qn_token_data = get_json_data(FLAGS.json_in_path)
-        
+
         if FLAGS.enable_ensemble_model:
-            models = FLAGS.ensemble_model_names.split(';')
+            # KV is 'label': ('model_file', 'exp_name'),
+            ensemble_label_to_model_meta = {
+                'binco_legacy': ['binco_legacy_model', 'binco_30b15_hidden=100_lr=0.001_batch=100_context=400_qn=27', False],  # 0.6900
+                'chgasebinco': ['chgasebinco_model', 'chgasebinco_1c999_hidden=100_lr=0.001_batch=100_context=400_qn=27', True]  # 0.7101
+            }
+            # model_labels = FLAGS.ensemble_model_names.split(';')
+            model_labels = ensemble_label_to_model_meta.keys()
 
             # A list to store the output of all predictions
             # each entry is a map, storing the start and end dist for that batch.
-            # len(ensemble_model_pred) is len(models)
+            # len(ensemble_model_pred) is len(model_labels)
             # len(ensemble_model_pred[0]) is number of batches
             # len(ensemble_model_pred[0]['start']) is batch_size
             # len(ensemble_model_pred[0]['end']) is batch_size
-            ensemble_model_pred = [] 
-            for model in models:
+            ensemble_model_pred = []
+            for label in model_labels:
                 tf.reset_default_graph()
-                print "Loading model: %s" % model 
+                model_name, model_exp_name, has_cnn = ensemble_label_to_model_meta[label]
+                print "Loading model: %s" % model_name
                 # TODO(binbinx): change this to appropriate models
-                qa_model = QAModel(FLAGS, id2word, word2id, emb_matrix, char2id ,id2char)
-                    
+                QAModel = importlib.import_module(model_name).QAModel
+                qa_model = (
+                    QAModel(FLAGS, id2word, word2id, emb_matrix, char2id ,id2char)
+                    if has_cnn
+                    else QAModel(FLAGS, id2word, word2id, emb_matrix))
+
                 with tf.Session(config=config) as sess:
                     # Initialize bestmodel directory
-                    ckpt_load_dir = os.path.join(EXPERIMENTS_DIR, model, "best_checkpoint")
-                    
+                    ckpt_load_dir = os.path.join(EXPERIMENTS_DIR, model_exp_name, "best_checkpoint")
+
                     # Load model from ckpt_load_dir
                     initialize_model(sess, qa_model, ckpt_load_dir, expect_exists=True)
 
@@ -342,14 +354,14 @@ def main(unused_argv):
                     qn_uuid_data_ = copy.deepcopy(qn_uuid_data)
                     context_token_data_ = copy.deepcopy(context_token_data)
                     qn_token_data_ = copy.deepcopy(qn_token_data)
-                    answers_dict = generate_answers(sess, qa_model, word2id, char2id, qn_uuid_data_, 
+                    answers_dict = generate_answers(sess, qa_model, word2id, char2id, qn_uuid_data_,
                                                     context_token_data_, qn_token_data_, ensemble_model_pred)
-                    
+
             pred_start_batches, pred_end_batches = resolve_ensemble_model_preds(ensemble_model_pred)
-                
-            final_ans_dict = generate_answers_with_start_end(FLAGS, word2id, char2id, qn_uuid_data, 
+
+            final_ans_dict = generate_answers_with_start_end(FLAGS, word2id, char2id, qn_uuid_data,
                  context_token_data, qn_token_data, pred_start_batches, pred_end_batches)
-                
+
             # Write the uuid->answer mapping a to json file in root dir
             print "Writing predictions to %s..." % FLAGS.json_out_path
             with io.open(FLAGS.json_out_path, 'w', encoding='utf-8') as f:
@@ -376,4 +388,3 @@ def main(unused_argv):
 
 if __name__ == "__main__":
     tf.app.run()
-
