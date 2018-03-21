@@ -149,14 +149,14 @@ def resolve_ensemble_model_preds(ensemble_model_pred, ensemble_schema=FLAGS.ense
         return heapq.nlargest(beam_search_size, enumerate(start_dist_example), lambda (i, prob): (prob, i))
 
     def beam_search(top_start_idx_probs, top_end_idx_probs):
-        """Find the (start_i, end_i) pair that end_i >= start_i and start_prob + end_prob is max.
+        """Find the (start_i, end_i) pair that 15 >= end_i >= start_i and start_prob * end_prob is max.
         """
         max_prob, max_pair = 0.0, None
         for start_i, start_prob in top_start_idx_probs:
             for end_i, end_prob in top_end_idx_probs:
-                if end_i < start_i:
+                if (end_i < start_i) or (end_i - start_i >= 15):
                     continue
-                cur_prob = start_prob + end_prob
+                cur_prob = start_prob * end_prob
                 cur_pair = (start_i, end_i)
                 if cur_prob > max_prob:
                     max_prob, max_pair = cur_prob, cur_pair
