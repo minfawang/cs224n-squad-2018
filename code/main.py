@@ -79,6 +79,7 @@ tf.app.flags.DEFINE_string("json_in_path", "", "For official_eval mode, path to 
 tf.app.flags.DEFINE_string("json_out_path", "predictions.json", "Output path for official_eval mode. Defaults to predictions.json")
 
 # Flags for ensemble model
+tf.app.flags.DEFINE_bool("is_codalab_eval", False, "This flag will change how to read the experiment best checkpoints.")
 tf.app.flags.DEFINE_bool("enable_ensemble_model", False, "Flag to control whether to ensemble multiple models or not.")
 tf.app.flags.DEFINE_string("ensemble_model_names", "", "A list of model names to ensemble separated by ';'. 'all' is a special value.")
 tf.app.flags.DEFINE_string('ensemble_schema', "sum", "Schema used to ensemble models.")
@@ -317,12 +318,12 @@ def main(unused_argv):
         if FLAGS.enable_ensemble_model:
             print('FLAGS.ensemble_model_names: %s' % FLAGS.ensemble_model_names)
             print('FLAGS.sum_weights: %s' % FLAGS.sum_weights)
-            # KV is 'label': ('model_file', 'exp_name', 'has_cnn', weight),
+            # KV is 'label': ('model_file', 'exp_name', 'codalab_bundle_name', 'has_cnn', weight),
             ensemble_label_to_model_meta = {
-                'binco_legacy': ['binco_legacy_model', 'binco_30b15_hidden=100_lr=0.001_batch=100_context=400_qn=27', False, 0.6692],  # 0.6900  (66.92, 59.01)
-                'chgasebinco': ['chgasebinco_model', 'chgasebinco_1c999_hidden=100_lr=0.001_batch=100_context=400_qn=27', True, 0.7045],  # 0.7101  (70.45, 64.32)
-                'chsebinco_real': ['chsebinco_model', 'chsebinco_real_1c999_hidden=100_lr=0.001_batch=100_context=400_qn=27', True, 0.6733],  # 0.6958, (67.33, 60.37)
-                'chsebinco_legacy': ['chsebinco_legacy_model', 'chsebinco_4a81a_hidden=100_lr=0.001_batch=100_context=400_qn=27', True, 0.6507],  # 0.6954, (65.07, 57.28)
+                'binco_legacy': ['binco_legacy_model', 'binco_30b15_hidden=100_lr=0.001_batch=100_context=400_qn=27', 'binco_30b15', False, 0.6692],  # 0.6900  (66.92, 59.01)
+                'chgasebinco': ['chgasebinco_model', 'chgasebinco_1c999_hidden=100_lr=0.001_batch=100_context=400_qn=27', 'chgasebinco_1c999', True, 0.7045],  # 0.7101  (70.45, 64.32)
+                'chsebinco_real': ['chsebinco_model', 'chsebinco_real_1c999_hidden=100_lr=0.001_batch=100_context=400_qn=27', 'chsebinco_real_1c999', True, 0.6733],  # 0.6958, (67.33, 60.37)
+                'chsebinco_legacy': ['chsebinco_legacy_model', 'chsebinco_4a81a_hidden=100_lr=0.001_batch=100_context=400_qn=27', 'chsebinco_4a81a', True, 0.6507],  # 0.6954, (65.07, 57.28)
             }
             model_labels = FLAGS.ensemble_model_names.split(';')
             if len(model_labels) == 1 and model_labels[0].lower() == 'all':
@@ -341,7 +342,7 @@ def main(unused_argv):
             sum_weights_list = []
             for label in model_labels:
                 tf.reset_default_graph()
-                model_name, model_exp_name, has_cnn, weight = ensemble_label_to_model_meta[label]
+                model_name, model_exp_name, cl_bundle_name, has_cnn, weight = ensemble_label_to_model_meta[label]
                 sum_weights_list += str(weight),
                 print "Loading model: %s" % model_name
                 # TODO(binbinx): change this to appropriate models
@@ -353,7 +354,10 @@ def main(unused_argv):
 
                 with tf.Session(config=config) as sess:
                     # Initialize bestmodel directory
-                    ckpt_load_dir = os.path.join(EXPERIMENTS_DIR, model_exp_name, "best_checkpoint")
+                    ckpt_load_dir = (
+                        os.path.join(EXPERIMENTS_DIR, model_exp_name, "best_checkpoint")
+                        if not FLAGS.is_codalab_eval
+                        else cl_bundle_name)
 
                     # Load model from ckpt_load_dir
                     initialize_model(sess, qa_model, ckpt_load_dir, expect_exists=True)
