@@ -322,8 +322,9 @@ def main(unused_argv):
                 'chsebinco_real': ['chsebinco_model', 'chsebinco_real_1c999_hidden=100_lr=0.001_batch=100_context=400_qn=27', True],  # 0.6958
                 'chsebinco_legacy': ['chsebinco_legacy_model', 'chsebinco_4a81a_hidden=100_lr=0.001_batch=100_context=400_qn=27', True],  # 0.6954
             }
-            # model_labels = FLAGS.ensemble_model_names.split(';')
-            model_labels = ensemble_label_to_model_meta.keys()
+            model_labels = FLAGS.ensemble_model_names.split(';')
+            if len(model_labels) == 1 and model_labels[0].lower() == 'all':
+                model_labels = ensemble_label_to_model_meta.keys()
 
             # A list to store the output of all predictions
             # each entry is a map, storing the start and end dist for that batch.
