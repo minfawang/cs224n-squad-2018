@@ -80,9 +80,9 @@ tf.app.flags.DEFINE_string("json_out_path", "predictions.json", "Output path for
 
 # Flags for ensemble model
 tf.app.flags.DEFINE_bool("enable_ensemble_model", False, "Flag to control whether to ensemble multiple models or not.")
-tf.app.flags.DEFINE_string("ensemble_model_names", "", "A list of model names to ensemble separated by ;")
+tf.app.flags.DEFINE_string("ensemble_model_names", "", "A list of model names to ensemble separated by ';'. 'all' is a special value.")
 tf.app.flags.DEFINE_string('ensemble_schema', "sum", "Schema used to ensemble models.")
-tf.app.flags.DEFINE_string("sum_weights", "", "If use sum schema, can optionally pass weights here. A list of weights separated by ;. If not set, assume all weights are 1.0")
+tf.app.flags.DEFINE_string("sum_weights", "", "If use sum schema, can optionally pass weights here. A list of weights separated by ;. If not set, assume all weights are 1.0. 'default' is a special value.")
 tf.app.flags.DEFINE_bool("enable_beam_search", False, "Use beam search in prediction.")
 tf.app.flags.DEFINE_integer("beam_search_size", 5, "Size of the beam search.")
 
@@ -315,16 +315,21 @@ def main(unused_argv):
         qn_uuid_data, context_token_data, qn_token_data = get_json_data(FLAGS.json_in_path)
 
         if FLAGS.enable_ensemble_model:
-            # KV is 'label': ('model_file', 'exp_name'),
+            print('FLAGS.ensemble_model_names: %s' % FLAGS.ensemble_model_names)
+            print('FLAGS.sum_weights: %s' % FLAGS.sum_weights)
+            # KV is 'label': ('model_file', 'exp_name', 'has_cnn', weight),
             ensemble_label_to_model_meta = {
-                'binco_legacy': ['binco_legacy_model', 'binco_30b15_hidden=100_lr=0.001_batch=100_context=400_qn=27', False],  # 0.6900
-                'chgasebinco': ['chgasebinco_model', 'chgasebinco_1c999_hidden=100_lr=0.001_batch=100_context=400_qn=27', True],  # 0.7101
-                'chsebinco_real': ['chsebinco_model', 'chsebinco_real_1c999_hidden=100_lr=0.001_batch=100_context=400_qn=27', True],  # 0.6958
-                'chsebinco_legacy': ['chsebinco_legacy_model', 'chsebinco_4a81a_hidden=100_lr=0.001_batch=100_context=400_qn=27', True],  # 0.6954
+                'binco_legacy': ['binco_legacy_model', 'binco_30b15_hidden=100_lr=0.001_batch=100_context=400_qn=27', False, 0.6692],  # 0.6900  (66.92, 59.01)
+                'chgasebinco': ['chgasebinco_model', 'chgasebinco_1c999_hidden=100_lr=0.001_batch=100_context=400_qn=27', True, 0.7045],  # 0.7101  (70.45, 64.32)
+                'chsebinco_real': ['chsebinco_model', 'chsebinco_real_1c999_hidden=100_lr=0.001_batch=100_context=400_qn=27', True, 0.6733],  # 0.6958, (67.33, 60.37)
+                'chsebinco_legacy': ['chsebinco_legacy_model', 'chsebinco_4a81a_hidden=100_lr=0.001_batch=100_context=400_qn=27', True, 0.6507],  # 0.6954, (65.07, 57.28)
             }
             model_labels = FLAGS.ensemble_model_names.split(';')
             if len(model_labels) == 1 and model_labels[0].lower() == 'all':
                 model_labels = ensemble_label_to_model_meta.keys()
+            else:
+                for label in model_labels:
+                    assert label in ensemble_label_to_model_meta
 
             # A list to store the output of all predictions
             # each entry is a map, storing the start and end dist for that batch.
@@ -333,9 +338,11 @@ def main(unused_argv):
             # len(ensemble_model_pred[0]['start']) is batch_size
             # len(ensemble_model_pred[0]['end']) is batch_size
             ensemble_model_pred = []
+            sum_weights_list = []
             for label in model_labels:
                 tf.reset_default_graph()
-                model_name, model_exp_name, has_cnn = ensemble_label_to_model_meta[label]
+                model_name, model_exp_name, has_cnn, weight = ensemble_label_to_model_meta[label]
+                sum_weights_list += weight,
                 print "Loading model: %s" % model_name
                 # TODO(binbinx): change this to appropriate models
                 QAModel = importlib.import_module(model_name).QAModel
@@ -360,7 +367,8 @@ def main(unused_argv):
                     answers_dict = generate_answers(sess, qa_model, word2id, char2id, qn_uuid_data_,
                                                     context_token_data_, qn_token_data_, ensemble_model_pred)
 
-            pred_start_batches, pred_end_batches = resolve_ensemble_model_preds(ensemble_model_pred)
+            sum_weights = ';'.join(sum_weights_list) if FLAGS.sum_weights.lower() == 'default' else FLAGS.sum_weights
+            pred_start_batches, pred_end_batches = resolve_ensemble_model_preds(ensemble_model_pred, sum_weights=sum_weights)
 
             final_ans_dict = generate_answers_with_start_end(FLAGS, word2id, char2id, qn_uuid_data,
                  context_token_data, qn_token_data, pred_start_batches, pred_end_batches)
