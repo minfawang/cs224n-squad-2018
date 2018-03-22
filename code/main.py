@@ -325,10 +325,13 @@ def main(unused_argv):
             print('FLAGS.sum_weights: %s' % FLAGS.sum_weights)
             # KV is 'label': ('model_file', 'exp_name', 'codalab_bundle_name', 'has_cnn', weight),
             ensemble_label_to_model_meta = {
-                'binco_legacy': ['binco_legacy_model', 'binco_30b15_hidden=100_lr=0.001_batch=100_context=400_qn=27', 'binco_30b15', False, 0.6692],  # 0.6900  (66.92, 59.01)
-                'chgasebinco': ['chgasebinco_model', 'chgasebinco_1c999_hidden=100_lr=0.001_batch=100_context=400_qn=27', 'chgasebinco_1c999', True, 0.7045],  # 0.7101  (70.45, 64.32)
-                'chsebinco_real': ['chsebinco_model', 'chsebinco_real_1c999_hidden=100_lr=0.001_batch=100_context=400_qn=27', 'chsebinco_real_1c999', True, 0.6733],  # 0.6958, (67.33, 60.37)
-                'chsebinco_legacy': ['chsebinco_legacy_model', 'chsebinco_4a81a_hidden=100_lr=0.001_batch=100_context=400_qn=27', 'chsebinco_4a81a', True, 0.6507],  # 0.6954, (65.07, 57.28)
+                'binco_legacy': ['binco_legacy_model', 'binco_30b15_hidden=100_lr=0.001_batch=100_context=400_qn=27', 'binco_30b15', False, 0.6692],  # 0.6900  (74.0, 63.5)
+                'chsebinco_real': ['chsebinco_model', 'chsebinco_real_1c999_hidden=100_lr=0.001_batch=100_context=400_qn=27', 'chsebinco_real_1c999', True, 0.6733],  # 0.6958, (74.7, 64.0)
+                'chsebinco_legacy': ['chsebinco_legacy_model', 'chsebinco_4a81a_hidden=100_lr=0.001_batch=100_context=400_qn=27', 'chsebinco_4a81a', True, 0.6507],  # 0.6954, (?, ?)
+                'chgasebinco': ['chgasebinco_model', 'chgasebinco_1c999_hidden=100_lr=0.001_batch=100_context=400_qn=27', 'chgasebinco_1c999', True, 0.7045],  # 0.7101  (76.6, 66.4)
+                'chgasebinco_91ca1': ['chgasebinco_model', 'chgasebinco_91ca1_hidden=100_lr=0.001_batch=100_context=400_qn=27', 'chgasebinco_91ca1', True, 0.69],  # 0.68  (? ?)
+                'chgasebinco_888ca': ['chgasebinco_model', 'chgasebinco_888ca_hidden=100_lr=0.001_batch=100_context=400_qn=27', 'chgasebinco_888ca', True, 0.69],  # 0.67  (? ?)
+                'chgasebinco_888ca_run2': ['chgasebinco_model', 'chgasebinco_888ca_run2_hidden=100_lr=0.001_batch=100_context=400_qn=27', 'chgasebinco_888ca_run2', True, 0.69],  # 0.6911  (? ?)
             }
             model_labels = FLAGS.ensemble_model_names.split(';')
             if len(model_labels) == 1 and model_labels[0].lower() == 'all':
