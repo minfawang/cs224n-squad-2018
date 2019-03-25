@@ -1,3 +1,9 @@
+# Disclaimer
+
+This repository holds the code used in the CS224N final project in Winter 2018. The code is not longer being actively developed/maintained. Use at your own risk.
+
+For future CS224N students, please read the [Honor Code](https://communitystandards.stanford.edu/policies-and-guidance/honor-code) and make sure there is no violations of policies before proceding with reading/using this code base.
+
 # cs224n-win18-squad
 Code for the Default Final Project (SQuAD) for [CS224n](http://web.stanford.edu/class/cs224n/), Winter 2018
 
